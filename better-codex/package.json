@@ -1,0 +1,74 @@
+{
+  "name": "better-codex",
+  "version": "1.2.45",
+  "private": true,
+  "description": "Browser frontend for the Codex app-server, styled after the open-claude-ui design language.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "desktop/main.mjs",
+  "bin": {
+    "better-codex": "server/main.mjs"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "start": "node server/main.mjs",
+    "desktop": "vite build && electron .",
+    "package:desktop": "vite build && electron-packager . \"Better Codex\" --out=out --overwrite --icon=desktop/icon --ignore=\"^/(src|public|node_modules|context/fixtures|index\\.html|tsconfig\\.json|vite\\.config\\.mjs|README\\.md)\" --ignore=\"\\.test\\.mjs$\" --ignore=\"\\.(nsh|bmp|icns)$\"",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test context/*.test.mjs server/*.test.mjs src/lib/*.test.mjs",
+    "installer:desktop": "npm run package:desktop && electron-builder --win nsis --prepackaged \"out/Better Codex-win32-x64\"",
+    "installer:mac": "npm run package:desktop -- --arch=arm64 --app-bundle-id=dev.better-codex.desktop --usage-description.Microphone=语音模式需要使用麦克风。 && codesign --force --deep --sign - \"out/Better Codex-darwin-arm64/Better Codex.app\" && electron-builder --mac dmg --arm64 --prepackaged \"out/Better Codex-darwin-arm64/Better Codex.app\""
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "docx-preview": "0.4.1",
+    "dompurify": "^3.4.16",
+    "highlight.js": "^11.12.0",
+    "jszip": "3.10.1",
+    "marked": "^18.1.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
+    "postcss": "^8.5.29",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "build": {
+    "appId": "dev.better-codex.desktop",
+    "electronVersion": "44.7.0",
+    "productName": "Better Codex",
+    "directories": {
+      "output": "out/installer"
+    },
+    "win": {
+      "icon": "desktop/icon.ico"
+    },
+    "mac": {
+      "icon": "desktop/icon.icns",
+      "identity": null
+    },
+    "dmg": {
+      "artifactName": "Better-Codex-${version}-${arch}.dmg"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "include": "desktop/installer.nsh",
+      "installerSidebar": "desktop/installer-sidebar.bmp",
+      "artifactName": "Better-Codex-Setup-${version}.exe"
+    }
+  }
+}

@@ -34,7 +34,7 @@ importers:
 
   codex-rs/responses-api-proxy/npm: {}
 
-  codex-ui:
+  better-codex:
     dependencies:
       '@xterm/addon-fit':
         specifier: ^0.11.0

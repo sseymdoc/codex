@@ -150,7 +150,7 @@ pub(crate) fn build_tool_router(
     add_core_tool_sources(&context, &mut registry);
     if turn_context.config.experimental_backend
         && step_store
-            .get::<codex_protocol::codex_ui_context::CodexUiContext>()
+            .get::<codex_protocol::better_codex_context::BetterCodexContext>()
             .is_some()
     {
         registry.remove(&ToolName::plain("update_plan"));
@@ -181,13 +181,14 @@ pub(crate) fn build_tool_router(
         &mut registry,
     );
     if turn_context.config.experimental_backend
-        && let Some(host) = step_store.get::<codex_protocol::codex_ui_context::CodexUiContext>()
+        && let Some(host) =
+            step_store.get::<codex_protocol::better_codex_context::BetterCodexContext>()
         && !crate::session::host_context::browser_tools_enabled(turn_context, environments, &host)
     {
         for tool in mcp
             .tools()
             .iter()
-            .filter(|tool| tool.server_name == "codex_ui_browser")
+            .filter(|tool| tool.server_name == "better_codex_browser")
         {
             registry.remove(&tool.canonical_tool_name());
         }
@@ -197,7 +198,7 @@ pub(crate) fn build_tool_router(
         for tool in mcp
             .tools()
             .iter()
-            .filter(|tool| tool.server_name == "codex_ui_desktop")
+            .filter(|tool| tool.server_name == "better_codex_desktop")
         {
             registry.remove(&tool.canonical_tool_name());
         }

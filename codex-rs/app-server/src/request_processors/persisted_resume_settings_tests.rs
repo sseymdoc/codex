@@ -30,8 +30,8 @@ fn settings_item(
         ThreadSettingsAppliedEvent {
             thread_id: None,
             thread_settings: ThreadSettingsSnapshot {
-                codex_ui_context: None,
-                codex_ui_desktop_context: None,
+                better_codex_context: None,
+                better_codex_desktop_context: None,
                 disabled_plugin_ids: Vec::new(),
                 model: "gpt-5".to_string(),
                 model_provider_id: "openai".to_string(),

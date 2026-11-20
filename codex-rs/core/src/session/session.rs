@@ -102,7 +102,8 @@ pub(crate) struct Session {
 
 #[derive(Clone)]
 pub(crate) struct SessionConfiguration {
-    pub(crate) codex_ui_context: Option<codex_protocol::codex_ui_context::CodexUiContext>,
+    pub(crate) better_codex_context:
+        Option<codex_protocol::better_codex_context::BetterCodexContext>,
     /// Runtime provider and its provider-specific execution policy.
     pub(super) provider: SharedModelProvider,
 
@@ -320,13 +321,13 @@ impl SessionConfiguration {
         &self,
         environment_selections: &[TurnEnvironmentSelection],
     ) -> ThreadSettingsSnapshot {
-        let mut codex_ui_context = self.codex_ui_context.clone();
-        let codex_ui_desktop_context = codex_ui_context
+        let mut better_codex_context = self.better_codex_context.clone();
+        let better_codex_desktop_context = better_codex_context
             .as_mut()
             .and_then(|context| context.desktop.take());
         ThreadSettingsSnapshot {
-            codex_ui_context,
-            codex_ui_desktop_context,
+            better_codex_context,
+            better_codex_desktop_context,
             model: self.step_settings.collaboration_mode.model().to_string(),
             model_provider_id: self.original_config_do_not_use.model_provider_id.clone(),
             service_tier: self.step_settings.service_tier.clone(),
@@ -350,10 +351,10 @@ impl SessionConfiguration {
         environment_selections: Vec<TurnEnvironmentSelection>,
     ) -> CodexThreadSettingsOverrides {
         CodexThreadSettingsOverrides {
-            codex_ui_context: self
+            better_codex_context: self
                 .original_config_do_not_use
                 .experimental_backend
-                .then(|| self.codex_ui_context.clone())
+                .then(|| self.better_codex_context.clone())
                 .flatten(),
             environments: Some(TurnEnvironmentRequests::new(
                 self.legacy_fallback_cwd.clone(),
@@ -449,9 +450,9 @@ impl SessionConfiguration {
             next_configuration.legacy_fallback_cwd = environments.legacy_fallback_cwd.clone();
             next_configuration.environments = environments.environments.clone();
         }
-        if let Some(context) = &updates.codex_ui_context {
+        if let Some(context) = &updates.better_codex_context {
             let invalid = |reason: &str| ConstraintError::InvalidValue {
-                field_name: "codexUiContext",
+                field_name: "betterCodexContext",
                 candidate: "host context".into(),
                 allowed: reason.into(),
                 requirement_source: codex_config::RequirementSource::Unknown,
@@ -462,7 +463,7 @@ impl SessionConfiguration {
             let mut context = context.clone();
             if context.desktop.is_none() {
                 context.desktop = self
-                    .codex_ui_context
+                    .better_codex_context
                     .as_ref()
                     .and_then(|previous| previous.desktop.clone());
             }
@@ -470,7 +471,7 @@ impl SessionConfiguration {
             if context.cwd != next_configuration.legacy_fallback_cwd {
                 return Err(invalid("context cwd must match the thread cwd"));
             }
-            next_configuration.codex_ui_context = Some(context);
+            next_configuration.better_codex_context = Some(context);
         }
         let cwd_changed = next_configuration.legacy_fallback_cwd != current_cwd;
         if let Some(runtime_workspace_roots) = &updates.runtime_workspace_roots {
@@ -641,7 +642,8 @@ pub(crate) struct SessionSettingsCommit {
 
 #[derive(Default, Clone)]
 pub(crate) struct SessionSettingsUpdate {
-    pub(crate) codex_ui_context: Option<codex_protocol::codex_ui_context::CodexUiContext>,
+    pub(crate) better_codex_context:
+        Option<codex_protocol::better_codex_context::BetterCodexContext>,
     pub(crate) step_settings: StepSettingsUpdate,
     /// Omission preserves the current data; an empty initializer clears it.
     pub(crate) turn_extension_init: Option<ExtensionDataInit>,

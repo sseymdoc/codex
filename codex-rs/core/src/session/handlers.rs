@@ -81,7 +81,7 @@ async fn accept_async_hook_wake(sess: &Arc<Session>, wake: codex_hooks::AsyncHoo
 }
 
 pub async fn interrupt(sess: &Arc<Session>) {
-    // Codex UI experimental backend: a user stop of a running turn also stops this thread's
+    // Better Codex experimental backend: a user stop of a running turn also stops this thread's
     // workflows and the spawned agents still running under a root thread (Claude's interrupt
     // sweep; background shells are kept). Stopped first, so the abort below cannot start a turn
     // for a run that was about to report, and again after it, for a run the aborted call

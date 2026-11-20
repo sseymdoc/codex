@@ -117,7 +117,7 @@ pub(crate) struct ThreadState {
     current_turn_history: ThreadHistoryBuilder,
     listener_thread: Option<Weak<CodexThread>>,
     watch_registration: WatchRegistration,
-    /// Codex UI experimental backend: the latest revert, for `thread/revert/switch`.
+    /// Better Codex experimental backend: the latest revert, for `thread/revert/switch`.
     pub(crate) revert_mark: Option<RevertMark>,
 }
 

@@ -1,0 +1,2612 @@
+/* Base and atoms (claude.ai audit W5, W7, W8, W10, W11, W12, W17; Claude Desktop 2.42304.0.0
+   c6a992d55 / shared-frame for what the audit did not measure). Every size routes through the
+   density ladder in tokens.css, so a [data-density="compact"] scope shrinks its controls. */
+
+/* ---------------------------------------------------------------------------
+   Base */
+
+:root {
+  /* Windows desktop shell (desktop/main.mjs): the caption buttons' strip. env() is only set
+     there, so both are 0 in a browser. */
+  --titlebar-h: env(titlebar-area-height, 0px);
+  --df-chrome-bar-caption-reserve: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* app-region inherits in Chromium, and the window's drag shape is every box with a region, later
+   ones over earlier ones. c6a992d55 resets it on every element so only the boxes that set it
+   count; without that, the frame's content column inherits the root's no-drag and, coming after
+   the chrome bar, takes the whole bar back out of the drag shape. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  app-region: initial;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/* The page itself never scrolls. An abspos node escapes an unpositioned scroller (each turn's
+   .sr-only heading sits where its turn is, against .transcript-wrap) and stretched the document
+   to the conversation's height, so a wheel over the sidebar, or past the transcript's end, moved
+   the whole window. */
+#root {
+  overflow: clip;
+}
+
+/* Tailwind preflight, as Claude's CSS has it: the hidden attribute beats a class's display (a
+   collapsed .tool-body stayed open as display: flow-root). */
+[hidden]:where(:not([hidden="until-found"])) {
+  display: none !important;
+}
+
+/* Preflight line height 1.5; .cds-root smoothing and no synthesized faces (c6a992d55). Text sits
+   on the regular rung of the wght axis (dark: 360, c6a992d55 :where(.cds-root)); every rule that
+   sets a weight sets its rung too, as .font-medium and the text-* classes do. */
+body {
+  background: var(--cds-page-bg);
+  color: var(--cds-text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--cds-font-size-body);
+  line-height: 1.5;
+  font-variation-settings: var(--cds-font-wght-regular);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-synthesis: none;
+}
+
+/* What the UA makes bold takes the bold rung; a table header's weight drives the axis itself
+   (c6a992d55 dark :is(b,strong), :where(.cds-root) th). */
+:where(b, strong, h1, h2, h3, h4, h5, h6) {
+  font-variation-settings: var(--cds-font-wght-bold);
+}
+
+:where(th) {
+  font-variation-settings: normal;
+}
+
+/* A density scope restates the body size, so its subtree inherits the scope's text. */
+[data-density] {
+  font-size: var(--cds-font-size-body);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: default;
+  -webkit-tap-highlight-color: transparent;
+}
+
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+/* Links look like their context; .link-btn is the accent text link. */
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* One focus treatment everywhere: 1px page-bg gap, 1px accent ring, 6px halo. */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-focus-shadow);
+}
+
+code,
+pre,
+.mono {
+  font-family: var(--font-mono);
+}
+
+code,
+pre,
+kbd,
+samp,
+.mono {
+  font-variant-ligatures: none;
+  font-feature-settings:
+    "calt" 0,
+    "liga" 0;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+}
+
+.muted {
+  color: var(--cds-text-muted);
+}
+
+.small {
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.fw-medium {
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.fw-semibold {
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+}
+
+.error-text {
+  color: var(--cds-text-danger);
+  font-size: 13px;
+}
+
+.inline-code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.zoomable {
+  cursor: zoom-in;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.plus {
+  color: var(--cds-text-git-added);
+}
+
+.minus {
+  color: var(--cds-text-git-removed);
+}
+
+/* Icon (ui.tsx; c6a992d55 [data-cds=Icon]:not(svg)): an Anthropicons glyph in a 1em box. W8:
+   the face gets heavier as it shrinks (20px wght 433 · 16px 533 · 12 / 18px 578), so each size
+   brings its weight. The slot sizes it (--cds-icon by density; a button's --btn-icon); an icon
+   given a size carries --icon-size / --icon-wght, which a slot's own rule still overrides. */
+[data-cds="Icon"] {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1em;
+  height: 1em;
+  font-family: var(--font-anthropicons, Anthropicons-Variable);
+  font-size: var(--icon-size, var(--cds-icon));
+  font-weight: var(--icon-wght, var(--cds-icon-wght));
+  font-style: normal;
+  font-feature-settings: "liga" 0;
+  font-optical-sizing: auto;
+  font-variation-settings: normal;
+  line-height: 1;
+  user-select: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Button (W7, shared-frame $l): button (size, radius, content, focus ring) over a ::before paint
+   layer that stands for span.cds-btn-squish > paint. Only the paint scales on press (60ms
+   ease-out, back over 450ms on the button spring); the label, icon and focus ring never move.
+   md is the density's control (32 comfortable / 24 compact); xs / sm / lg take the ladder's
+   --xs / --sm / --lg rungs. Label and glyph sit 4px apart (gap-1). */
+
+.btn {
+  --btn-h: var(--cds-h-control);
+  --btn-r: var(--cds-radius);
+  --btn-fs: var(--cds-font-size-body);
+  --btn-lh: var(--cds-leading-body);
+  --btn-px: var(--cds-pad-md);
+  --btn-icon: var(--cds-icon);
+  --btn-icon-wght: var(--cds-icon-wght);
+  --btn-bg: transparent;
+  --btn-bg-hover: var(--btn-bg);
+  --btn-ring: 0 0 #0000;
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: none;
+  height: var(--btn-h);
+  min-width: var(--btn-h);
+  padding: 0 var(--btn-px);
+  border-radius: var(--btn-r);
+  color: var(--cds-text-primary);
+  font-size: var(--btn-fs);
+  line-height: var(--btn-lh);
+  white-space: nowrap;
+  text-decoration: none;
+  user-select: none;
+  transition:
+    color var(--cds-dur-fast) ease-out,
+    box-shadow var(--cds-dur-fast) ease-out;
+}
+
+/* Solid fills (primary / danger / brand) inset their paint by half a pixel. */
+.btn::before {
+  content: "";
+  position: absolute;
+  inset: var(--btn-inset, 0);
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--btn-bg);
+  box-shadow: var(--btn-ring);
+  transform-origin: 50% center;
+  transition:
+    transform var(--cds-dur-slow) var(--cds-btn-spring),
+    background-color var(--cds-dur-fast) ease-out,
+    box-shadow var(--cds-dur-fast) ease-out;
+}
+
+/* Open menu triggers keep the hover fill; a plain disclosure (no aria-haspopup) does not. */
+.btn:hover:not(:disabled)::before,
+.btn[aria-haspopup][aria-expanded="true"]::before {
+  background: var(--btn-bg-hover);
+}
+
+/* Button writes --cds-btn-press-sx / -sy on press so every side moves in by h / 32 px (0.5–1.5,
+   shared-frame Bl / ms); .975 is the CSS fallback for links styled as buttons. */
+.btn:active:not(:disabled)::before {
+  transform: scale(var(--cds-btn-press-sx, 0.975), var(--cds-btn-press-sy, 0.975));
+  transition:
+    transform var(--cds-dur-fast) ease-out,
+    background-color var(--cds-dur-fast) ease-out,
+    box-shadow var(--cds-dur-fast) ease-out;
+}
+
+/* The ring (:focus-visible, or a dialog's initial focus) is the button's own box-shadow; the
+   paint keeps a 1px page-coloured gap inside it. */
+.btn[data-initial-focus]:focus {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.btn-danger:is(:focus-visible, [data-initial-focus]:focus) {
+  box-shadow: var(--cds-focus-shadow-danger);
+}
+
+.btn:is(:focus-visible, [data-initial-focus]:focus)::before {
+  box-shadow: inset 0 0 0 1px var(--cds-page-bg);
+}
+
+.btn:disabled:not([aria-busy]) {
+  opacity: var(--cds-opacity-disabled);
+}
+
+/* Glyphs follow the button size (shared-frame Yl): md / sm take the density's icon (20 / 16),
+   xs one step down (16 / 12), lg 20. Beside a label they tuck 4px into the padding. */
+.btn > :is(svg, [data-cds="Icon"]) {
+  flex: none;
+}
+
+.btn > [data-cds="Icon"]:not(.caret, .warn-glyph) {
+  font-size: var(--btn-icon);
+  font-weight: var(--btn-icon-wght);
+}
+
+.btn:not(.btn-icon) > :is(svg, [data-cds="Icon"], .spinner):first-child {
+  margin-inline-start: -4px;
+}
+
+.btn:not(.btn-icon) > :is(svg, [data-cds="Icon"]):last-child:not(:first-child) {
+  margin-inline-end: -4px;
+}
+
+.btn-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btn-xs {
+  --btn-h: var(--cds-h-control--xs);
+  --btn-r: var(--cds-radius--xs);
+  --btn-fs: var(--cds-font-size-body--xs);
+  --btn-lh: var(--cds-leading-body--xs);
+  --btn-px: var(--cds-pad-md--xs);
+  --btn-icon: var(--cds-icon--xs);
+  --btn-icon-wght: var(--cds-icon-wght--xs);
+}
+
+.btn-sm {
+  --btn-h: var(--cds-h-control--sm);
+  --btn-r: var(--cds-radius--sm);
+  --btn-fs: var(--cds-font-size-body--sm);
+  --btn-lh: var(--cds-leading-body--sm);
+  --btn-px: var(--cds-pad-md--sm);
+}
+
+.btn-lg {
+  --btn-h: var(--cds-h-control--lg);
+  --btn-r: var(--cds-radius--lg);
+  --btn-fs: var(--cds-font-size-body--lg);
+  --btn-lh: var(--cds-leading-body--lg);
+  --btn-px: var(--cds-pad-md--lg);
+  --btn-icon: 20px;
+  --btn-icon-wght: 433.3;
+}
+
+.btn-icon {
+  width: var(--btn-h);
+  padding: 0;
+}
+
+.btn-primary {
+  --btn-bg: var(--cds-fill-primary);
+  --btn-bg-hover: var(--cds-fill-primary-hover);
+  --btn-inset: 0.5px;
+  color: var(--cds-on-primary);
+}
+
+.btn-secondary {
+  --btn-bg: var(--cds-fill-secondary);
+  --btn-bg-hover: var(--cds-fill-secondary-hover);
+  --btn-ring: inset 0 0 0 1px var(--cds-fill-secondary-ring), 0 1px 2px #0000000d;
+}
+
+.btn-ghost {
+  --btn-bg-hover: var(--cds-fill-ghost-hover);
+}
+
+/* Hover brightens to red-400. */
+.btn-danger {
+  --btn-bg: var(--cds-fill-danger);
+  --btn-bg-hover: var(--cds-fill-danger-hover);
+  --btn-inset: 0.5px;
+  color: var(--cds-on-danger);
+}
+
+/* The solid fills are medium (thinned on the wght axis in dark mode, like .fw-medium); keycaps on
+   them take the label's colour. */
+.btn-primary,
+.btn-danger {
+  --cds-shortcut-cap-ink: currentColor;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.btn-muted {
+  color: var(--cds-text-muted);
+}
+
+.btn-muted:hover:not(:disabled),
+.btn-muted[aria-expanded="true"] {
+  color: var(--cds-text-primary);
+}
+
+.btn-ink2 {
+  color: var(--cds-text-secondary);
+}
+
+.btn-ink2:hover:not(:disabled),
+.btn-ink2[aria-expanded="true"] {
+  color: var(--cds-text-primary);
+}
+
+.btn-active {
+  --btn-bg: var(--cds-fill-ghost-selected);
+  --btn-bg-hover: var(--cds-fill-ghost-selected);
+}
+
+.btn .caret {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+/* TextLink (c6a992d55 .cds-text-link-underline): accent, a 40% currentColor underline 3px down
+   that goes solid on hover and focus over 60ms. */
+.link-btn {
+  border-radius: 2px;
+  color: var(--cds-text-accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 3px;
+  transition:
+    color var(--cds-dur-fast) var(--cds-ease-out),
+    text-decoration-color var(--cds-dur-fast) var(--cds-ease-out),
+    box-shadow var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+.link-btn:is(:hover, :focus-visible) {
+  text-decoration-color: currentColor;
+}
+
+/* Shortcut, text variant (menu rows, tooltips): plain muted text, "Ctrl+K". */
+.kbd {
+  font: inherit;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--cds-text-muted);
+  white-space: nowrap;
+}
+
+/* Shortcut, keycap variant (Kbd, shared-frame ks): a 1em + 6px cap per key, 2px apart, caption
+   text in --cds-shortcut-cap-ink with a currentColor hairline. */
+.kbd-caps {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  color: var(--cds-shortcut-cap-ink);
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
+  white-space: nowrap;
+}
+
+.kbd-cap {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  height: calc(1em + 6px);
+  min-width: calc(1em + 6px);
+  padding: 0 3px;
+  border: 1px solid var(--cds-shortcut-cap-line);
+  border-radius: var(--cds-keycap-radius, 4px);
+  background: var(--cds-shortcut-cap-fill);
+  font: inherit;
+  line-height: 1;
+}
+
+/* A one-character key is a square cap (shared-frame Bs). */
+.kbd-cap-square {
+  width: calc(1em + 6px);
+  padding: 0;
+}
+
+.kbd-then {
+  padding: 0 2px;
+}
+
+/* Badge: xs 18 · r4.5 · 11/500; 2xs 16 · r4 · 10px; warning tone. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4.5px;
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-secondary);
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
+  white-space: nowrap;
+}
+
+.badge-2xs {
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 10px;
+}
+
+.badge-warning {
+  background: var(--cds-bg-tint-yellow);
+  color: var(--cds-text-warning);
+}
+
+/* ---------------------------------------------------------------------------
+   Menus (W5, shared-frame Menu.Popup): 128–320 wide, radius = control + gutter 4, padding 4,
+   popover surface, 1px ring + popover shadow, scroll-fade-y on the list. Items follow the
+   density: max(control, line) tall, (control − line) / 2 block padding, 10 / 8 inline, r =
+   control radius, body text, highlighted at alpha 5%. */
+
+.popover-root {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+/* Portaled to <body>, placed with fixed coordinates 6px off its anchor (ui.tsx place()), and
+   carrying the anchor's [data-density]; too tall for the room on its side, it is capped there
+   and scrolls. It appears at once, as the CDS menu popup does. Its surface is the page colour
+   for the focus rings inside (CDS Portal surface="surface-3"). Body text (text-body); the list's
+   transparent bottom border of --cds-ring-inner leaves a dark-mode menu 1px taller. */
+.popover {
+  --cds-page-bg: var(--cds-surface-popover);
+  position: fixed;
+  z-index: var(--z-portal);
+  min-width: 128px;
+  max-width: 320px;
+  padding: var(--cds-menu-gutter) var(--cds-menu-gutter) calc(var(--cds-menu-gutter) + var(--cds-ring-inner));
+  border-radius: var(--cds-radius-menu);
+  background: var(--cds-surface-popover);
+  box-shadow: var(--cds-shadow-menu);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  text-align: left;
+  white-space: normal;
+  outline: none;
+}
+
+.popover:focus-visible {
+  box-shadow: var(--cds-shadow-menu);
+}
+
+/* Long lists scroll inside the menu so submenus can still sit outside it. */
+.menu-scroll {
+  max-height: min(380px, 56vh);
+  margin: calc(-1 * var(--cds-menu-gutter));
+  padding: var(--cds-menu-gutter);
+  overflow-y: auto;
+}
+
+/* The environment picker (cc43287c9 P8: SearchablePopup min-w-[260px], its 更多 submenu D8 220). */
+.menu-env {
+  min-width: 260px;
+}
+
+.submenu-env {
+  min-width: 220px;
+}
+
+/* A searchable menu's header (shared-frame yT, HC header): the TextInput borderless, unfilled and
+   ringless, 8 in (10 comfortable), over a hairline the menu's full width, gutter below the field
+   and 4 above the rows. It stays put while the rows scroll. */
+.menu-search {
+  position: sticky;
+  top: calc(-1 * var(--cds-menu-gutter));
+  z-index: 1;
+  margin-top: calc(-1 * var(--cds-menu-gutter));
+  padding-top: var(--cds-menu-gutter);
+  background: var(--cds-surface-popover);
+}
+
+.menu-search::after {
+  content: "";
+  display: block;
+  height: 1px;
+  margin: var(--cds-menu-gutter) calc(-1 * var(--cds-menu-gutter)) 4px;
+  background: var(--cds-border);
+}
+
+.menu-search .input,
+.menu-search .input:is(:hover, :focus, :focus-visible) {
+  padding-inline-start: 10px;
+  background: transparent;
+  box-shadow: none;
+}
+
+[data-density="compact"] .menu-search .input {
+  padding-inline-start: 8px;
+}
+
+/* A row's action key (c227f4d5e hQ): an icon-sized sm glyph, r4, muted, hidden until the row is
+   highlighted; it fills alpha-2 under the pointer. */
+.menu-key {
+  display: grid;
+  place-items: center;
+  width: var(--cds-icon);
+  height: var(--cds-icon);
+  flex: none;
+  border-radius: 4px;
+  color: var(--cds-text-muted);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.menu-item:is(:hover, :focus-visible, [data-highlighted]) .menu-key {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.menu-key:hover {
+  background: var(--cds-alpha-2);
+  color: var(--cds-text-primary);
+}
+
+/* 没有匹配项 (cc43287c9 k8): footnote, muted, pad md / sm. */
+.menu-none {
+  padding: var(--cds-pad-sm) var(--cds-pad-md);
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.menu-model {
+  width: 224px;
+}
+
+.menu-note {
+  min-height: 42px;
+  padding: 4px var(--cds-menu-item-px);
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+/* Group label (shared-frame eC): footnote, medium, muted, 4px above and below. */
+.menu-section {
+  padding: 4px var(--cds-menu-item-px);
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.menu-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  width: 100%;
+  min-height: max(var(--cds-h-control), var(--cds-leading-body));
+  padding: calc((var(--cds-h-control) - var(--cds-leading-body)) / 2) var(--cds-menu-item-px);
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  text-align: left;
+  user-select: none;
+}
+
+.menu-item:hover:not(:disabled),
+.menu-item[data-highlighted] {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.menu-item:focus-visible {
+  box-shadow: none;
+  background: var(--cds-fill-ghost-hover);
+}
+
+.menu-item:disabled {
+  opacity: var(--cds-opacity-disabled);
+}
+
+/* Danger items go red with white text while highlighted, their hint and shortcut too (Cx). */
+.menu-item.danger {
+  color: var(--cds-text-danger);
+}
+
+.menu-item.danger:is(:hover:not(:disabled), [data-highlighted], :focus-visible) {
+  background: var(--cds-fill-danger);
+  color: var(--cds-on-danger);
+}
+
+.menu-item.danger:is(:hover:not(:disabled), [data-highlighted], :focus-visible) :is(.menu-hint, .menu-value, .kbd) {
+  color: inherit;
+}
+
+/* Two-line items: the description's footnote line sets the bottom pad (W5: 6px 10px 7px). */
+.menu-item.two-line {
+  padding-bottom: calc((var(--cds-h-control) - var(--cds-font-size-body) - var(--cds-leading-footnote) + var(--cds-font-size-footnote)) / 2);
+}
+
+.menu-icon {
+  display: grid;
+  place-items: center;
+  width: var(--cds-icon);
+  height: var(--cds-icon);
+  flex: none;
+}
+
+.menu-icon > [data-cds="Icon"],
+.menu-check > [data-cds="Icon"] {
+  font-size: var(--cds-icon);
+  font-weight: var(--cds-icon-wght);
+}
+
+/* The check is bold (shared-frame menu item: Check, size auto, bold). */
+.menu-check > [data-cds="Icon"] {
+  font-weight: var(--cds-icon-wght--bold);
+}
+
+.menu-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.menu-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The description wraps in full (no descriptionLines). */
+.menu-hint {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  overflow-wrap: break-word;
+}
+
+/* Trailing group (XS / ZS): the check, the current value (a footnote, 160 at most) and the
+   shortcut, gap-md after the label; the last glyph tucks 4px into the padding. */
+.menu-text + :is(.menu-check, .menu-value, .kbd) {
+  margin-inline-start: var(--cds-gap-md);
+}
+
+.menu-value {
+  flex: none;
+  max-width: 160px;
+  overflow: hidden;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-item .kbd {
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.menu-check {
+  display: grid;
+  place-items: center;
+  width: var(--cds-icon);
+  height: var(--cds-icon);
+  flex: none;
+  color: var(--cds-fill-accent);
+}
+
+.menu-chevron {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+.menu-item > :is(.menu-check, .menu-chevron):last-child {
+  margin-inline-end: -4px;
+}
+
+.menu-sep {
+  height: 1px;
+  margin: var(--cds-menu-gutter) var(--cds-menu-item-px);
+  background: var(--cds-border);
+}
+
+.menu-empty {
+  padding: 8px var(--cds-menu-item-px);
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+}
+
+/* W5 menu-shaped select (replaces the native <select>): ghost trigger, value + caret. */
+.menu-select {
+  max-width: 260px;
+}
+
+.menu-select-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-select-menu {
+  width: 224px;
+  max-height: min(380px, 56vh);
+  overflow-y: auto;
+}
+
+/* The outline variant (shared-frame HO + UO.outline, px-sm, fullWidth): a field, value then caret;
+   its list is as wide (iA: w-[var(--anchor-width)] min-w-[12rem]). */
+.menu-select-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-inline: var(--cds-pad-sm);
+  text-align: start;
+}
+
+.menu-select-field .menu-select-value {
+  flex: 1;
+}
+
+.menu-select-field .caret {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+.menu-select-field-menu {
+  width: var(--anchor-width);
+  min-width: 12rem;
+  max-width: none;
+}
+
+/* Submenu (Base UI nested menu): toward inline-end, 2px off the parent menu, its top edge on
+   the trigger row; Submenu flips it to inline-start when the window has no room. As wide as its
+   rows within the menu's 128–320 (a CDS Menu.Popup sets no width).
+   ponytail: it lives inside the parent, so a parent capped to the window (place()) clips it;
+   portal it like the root menu if menus that tall ever carry submenus. */
+.submenu {
+  position: absolute;
+  z-index: 1;
+  top: var(--sub-top, 0);
+  left: calc(100% + 2px);
+  width: max-content;
+}
+
+.submenu[data-side="start"] {
+  right: calc(100% + 2px);
+  left: auto;
+}
+
+/* A file menu's submenu (c856385e2 SubmenuPopup, sideOffset -4): over the trigger's edge by 4px. */
+.submenu-fit {
+  left: calc(100% - 4px);
+}
+
+.submenu-fit[data-side="start"] {
+  right: calc(100% - 4px);
+}
+
+/* ---------------------------------------------------------------------------
+   Tooltip (W5, shared-frame Zp): #0b0b0b (dark: surface-3 with a 1px inner ring), 13/18, r6,
+   3px 8px, min-h 24, at most 240 wide, 4px above the trigger (below with data-tip-side="bottom",
+   past its end with "right"),
+   opacity + scale(.98) from that edge over 120ms ease-snap, none when data-instant. Text without
+   a shortcut is balanced. One layer for the page (TooltipLayer); it takes the pointer only while
+   open (hoverable) and goes invisible while its trigger is clipped out of sight. */
+
+.tooltip {
+  position: fixed;
+  z-index: calc(var(--z-portal) + 1);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 240px;
+  min-height: 24px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--cds-tooltip-bg);
+  color: var(--cds-tooltip-fg);
+  box-shadow: var(--cds-shadow-sm);
+  font-size: 13px;
+  line-height: 18px;
+  /* Its text is in a dark scope in either mode (shared-frame um: cds-dark-scope): dark regular. */
+  font-variation-settings: "wght" 360;
+  pointer-events: none;
+  opacity: 0;
+  scale: 0.98;
+  transform-origin: 50% 100%;
+  transition:
+    opacity var(--cds-dur-snap) var(--cds-ease-snap),
+    scale var(--cds-dur-snap) var(--cds-ease-snap);
+}
+
+.tooltip[data-side="bottom"] {
+  transform-origin: 50% 0;
+}
+
+.tooltip[data-side="right"] {
+  transform-origin: 0 50%;
+}
+
+.tooltip[data-side="left"] {
+  transform-origin: 100% 50%;
+}
+
+.dark .tooltip {
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-sm);
+}
+
+.tooltip:not(:has(.kbd)) {
+  text-wrap: balance;
+}
+
+.tooltip[data-open] {
+  opacity: 1;
+  scale: 1;
+  pointer-events: auto;
+}
+
+/* One to the side (the session row's title, hoverable false) never takes the pointer. */
+.tooltip[data-open]:is([data-side="right"], [data-side="left"]) {
+  pointer-events: none;
+}
+
+/* Each tooltip is a fresh element: it fades in from the closed look. */
+@starting-style {
+  .tooltip[data-open] {
+    opacity: 0;
+    scale: 0.98;
+  }
+}
+
+.tooltip[data-instant] {
+  transition-duration: 0s;
+}
+
+.tooltip[data-anchor-hidden] {
+  visibility: hidden;
+}
+
+.tooltip-text {
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+/* data-tip-wide: up to 480 or the room there is (cc5c56f5c t: max-w-[min(480px,var(--available-width))]). */
+.tooltip[data-wide] {
+  max-width: min(480px, calc(100vw - 16px));
+}
+
+/* data-tip-path: each piece after a separator is one unbreakable box (cc5c56f5c n). */
+.tooltip-path > span {
+  display: inline-block;
+  max-width: 100%;
+  white-space: pre-wrap;
+}
+
+.tooltip[data-lines="4"] .tooltip-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+
+/* The shortcut stays on the first line when the text wraps. */
+.tooltip > .kbd {
+  align-self: flex-start;
+  line-height: 18px;
+}
+
+/* With a detail line, or multiline (shared-frame Zp Yp): flex-col gap-0.5 py-1.5, the label row
+   on top. */
+.tooltip:is([data-detail], [data-multiline]) {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding-block: 6px;
+}
+
+.tooltip-line {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+/* text-secondary of the dark scope Zp wraps its content in (shared-frame kp: cds-dark-scope), so
+   it reads on the near-black tooltip in light mode too. */
+.tooltip-detail {
+  overflow-wrap: anywhere;
+  /* A detail of several lines (cf74bc599 cj: one per environment detail). */
+  white-space: pre-line;
+  color: var(--gray-200);
+  font-size: 11px;
+  line-height: 14px;
+}
+
+/* ---------------------------------------------------------------------------
+   Dialogs (shared-frame Dialog): portaled to <body> and centred; 1rem from the window sides and
+   at least max(1rem, title row) from top and bottom. The scrim (--cds-backdrop) fades in over
+   base ease-out; the panel (card radius, popover surface, ring + shadow-lg, padding 24) enters
+   from opacity 0 / scale .98 and leaves the same way (Dialog plays the exit on a copy). Head,
+   body and footer scroll together inside the panel under 28px fade strips (the default, non-
+   panels layout). Sizes sm 400 / md 520 / lg 720 / xl 880 / 3xl 1152. A dialog
+   opened over another blurs it 2px under the scrim colour; its own scrim stays clear.
+   ponytail: no fitVisualViewport (CDS re-centres the panel in the visual viewport while a soft
+   keyboard covers 120px or more of it); add it if better-codex is used on touch devices. */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: var(--cds-backdrop);
+  transition: background-color var(--cds-dur-base) var(--cds-ease-out);
+}
+
+/* The scrim fades its colour, not its opacity, so the panel inside keeps its own fade. */
+@starting-style {
+  .dialog-backdrop {
+    background-color: transparent;
+  }
+}
+
+/* A dialog's exit copy is inert and never counts as the one below. */
+.dialog-backdrop:not([inert]) ~ .dialog-backdrop {
+  background-color: transparent;
+}
+
+/* The title row stays a window drag handle while a dialog is up (CDS window drag strip). */
+.dialog-drag-strip {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: var(--z-modal);
+  height: var(--titlebar-inset);
+  -webkit-app-region: drag;
+}
+
+.dialog {
+  --dialog-w: 520px;
+  --cds-page-bg: var(--cds-surface-popover);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: calc(100vw - 2rem - 2 * max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px)));
+  max-width: var(--dialog-w);
+  max-height: calc(100dvh - max(2rem, 2 * var(--titlebar-inset)) - 2 * max(env(safe-area-inset-top, 0px), env(safe-area-inset-bottom, 0px)));
+  overflow-y: auto;
+  scroll-padding-block: var(--cds-scroll-fade-size);
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-popover);
+  box-shadow: var(--cds-shadow-panel-lg);
+  /* Body text (CDS Dialog.Popup text-body). */
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: break-word;
+  outline: none;
+  transition:
+    opacity var(--cds-dur-base) var(--cds-ease-out),
+    scale var(--cds-dur-base) var(--cds-ease-out),
+    filter var(--cds-dur-base) var(--cds-ease-out);
+}
+
+@starting-style {
+  .dialog {
+    opacity: 0;
+    scale: 0.98;
+  }
+}
+
+.dialog::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  border-radius: inherit;
+  background: var(--cds-backdrop);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--cds-dur-base) var(--cds-ease-out);
+}
+
+.dialog[data-nested-dialog-open] {
+  filter: blur(2px);
+}
+
+.dialog[data-nested-dialog-open]::after {
+  opacity: 1;
+}
+
+.dialog-sm {
+  --dialog-w: 400px;
+}
+
+.dialog-lg {
+  --dialog-w: 720px;
+}
+
+.dialog-xl {
+  --dialog-w: 880px;
+}
+
+.dialog-3xl {
+  --dialog-w: 1152px;
+}
+
+/* Head (w_): pad-md above the content, not sticky. */
+.dialog-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: none;
+  padding: var(--cds-pad-xl) var(--cds-pad-xl) var(--cds-pad-md);
+}
+
+.dialog-head .btn {
+  margin: calc(-1 * var(--cds-pad-sm)) calc(-1 * var(--cds-pad-sm)) 0 0;
+}
+
+/* Title column: nudged up 4px (2px in an alert) to sit level with the close button. */
+.dialog-head > :first-child {
+  flex: 1;
+  min-width: 0;
+  margin-top: -4px;
+}
+
+/* Title: the density's title size, semibold (.fw-semibold); an alert takes heading, medium. */
+.dialog-title {
+  margin: 0;
+  font-size: var(--cds-font-size-title);
+  line-height: var(--cds-leading-title);
+  overflow-wrap: break-word;
+}
+
+.dialog[data-alert] .dialog-head > :first-child {
+  margin-top: -2px;
+}
+
+.dialog[data-alert] .dialog-title {
+  font-size: var(--cds-font-size-heading);
+  line-height: var(--cds-leading-heading);
+}
+
+.dialog-desc {
+  margin: 4px 0 0;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: break-word;
+}
+
+.dialog-body {
+  padding: 0 var(--cds-pad-xl);
+}
+
+.dialog-body:not(:has(+ .dialog-foot)) {
+  padding-bottom: var(--cds-pad-xl);
+}
+
+/* Footer: 16px under the content, actions at the end, stacked (primary on top) under 640px. */
+.dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: none;
+  padding: var(--cds-pad-lg) var(--cds-pad-xl) var(--cds-pad-xl);
+}
+
+/* A delete at the start pushes the rest to the end (ca690a791 Footer align="between": ghost,
+   text-danger). */
+.dialog-foot-delete.btn {
+  margin-inline-end: auto;
+  color: var(--cds-text-danger);
+}
+
+/* With no body the header's margin and the footer's collapse (CDS Header mb-pad-md, Footer
+   mt-pad-lg): pad-lg between them, not both. */
+.dialog-head + .dialog-foot {
+  padding-top: calc(var(--cds-pad-lg) - var(--cds-pad-md));
+}
+
+@media (max-width: 639.98px) {
+  .dialog-foot {
+    flex-direction: column-reverse;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Form fields (W11): fill-field background, 1px inner ring; focus swaps in the focus shadow.
+   md is the density's control; .input-lg is the login page's 40 · r10 · 15px. */
+
+.input {
+  width: 100%;
+  height: var(--cds-h-control);
+  padding: 0 var(--cds-pad-md);
+  border: 0;
+  border-radius: var(--cds-radius);
+  background: var(--cds-fill-field);
+  box-shadow: inset 0 0 0 1px var(--cds-fill-field-ring);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  outline: none;
+  transition: box-shadow var(--cds-dur-fast) ease-out;
+}
+
+.input::placeholder {
+  color: var(--cds-text-muted);
+}
+
+/* TextInput: a strong ring on hover, a danger ring while aria-invalid (danger focus ring). */
+.input:hover:not(:focus, :disabled, [aria-invalid="true"]) {
+  box-shadow: inset 0 0 0 1px var(--cds-border-strong);
+}
+
+.input[aria-invalid="true"] {
+  box-shadow: inset 0 0 0 1px var(--cds-fill-danger);
+}
+
+.input:focus,
+.input:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.input[aria-invalid="true"]:focus {
+  box-shadow: var(--cds-focus-shadow-danger);
+}
+
+.input:disabled {
+  opacity: var(--cds-opacity-disabled);
+}
+
+/* data-size="lg" scales the inline padding with the rest. */
+.input-lg {
+  height: var(--cds-h-control--lg);
+  padding-inline: var(--cds-pad-md--lg);
+  border-radius: var(--cds-radius--lg);
+  font-size: var(--cds-font-size-body--lg);
+}
+
+textarea.input {
+  height: auto;
+  padding: var(--cds-pad-sm) var(--cds-pad-md);
+  resize: vertical;
+  line-height: var(--cds-leading-body);
+}
+
+select.input {
+  padding-right: 8px;
+}
+
+.select {
+  width: auto;
+  min-width: 180px;
+  max-width: 260px;
+}
+
+/* SegmentedControl (W7, shared-frame hO): as wide as its options, track padding 1px, radius =
+   the control's (md the density's; sm / lg the ladder's rungs); the thumb (one radius less, a
+   1px inner ring) is measured to the checked option by Segmented. Options are secondary text,
+   primary when hovered or checked. */
+.segmented {
+  --seg-h: var(--cds-h-control);
+  --seg-r: var(--cds-radius);
+  --seg-fs: var(--cds-font-size-body);
+  --seg-lh: var(--cds-leading-body);
+  --seg-px: var(--cds-pad-md);
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  padding: 1px;
+  border-radius: var(--seg-r);
+  background: var(--cds-segmented-control-track);
+}
+
+.segmented-thumb {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  left: 0;
+  visibility: hidden;
+  border-radius: calc(var(--seg-r) - 1px);
+  background: var(--cds-segmented-control-thumb);
+  box-shadow: inset 0 0 0 1px var(--cds-border), 0 1px 2px #0000000d;
+  transform-origin: left;
+}
+
+.segmented-item {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: calc(var(--seg-h) - 2px);
+  padding: 0 var(--seg-px);
+  border-radius: calc(var(--seg-r) - 2px);
+  color: var(--cds-text-secondary);
+  font-size: var(--seg-fs);
+  line-height: var(--seg-lh);
+  white-space: nowrap;
+  transition: color var(--cds-dur-fast) ease-out;
+}
+
+.segmented-item:hover,
+.segmented-item[aria-checked="true"] {
+  color: var(--cds-text-primary);
+}
+
+/* Switch (shared-frame): h = --cds-switch-h (20 comfortable / 16 compact), w = h × 1.8, 2px
+   padding, knob h − 4 travelling h × .8 on snap overshoot; on is the accent (a user setting,
+   not agent work). */
+.toggle {
+  --switch-h: var(--cds-switch-h);
+  position: relative;
+  flex: none;
+  width: calc(var(--switch-h) * 1.8);
+  height: var(--switch-h);
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--cds-switch-track);
+}
+
+.toggle:hover:not(:disabled) {
+  background: var(--cds-switch-track-hover);
+}
+
+.toggle[aria-checked="true"] {
+  background: var(--cds-fill-accent);
+}
+
+.toggle[aria-checked="true"]:hover:not(:disabled) {
+  background: var(--cds-fill-accent-hover);
+}
+
+.toggle:disabled {
+  opacity: var(--cds-opacity-disabled);
+}
+
+.toggle::after {
+  content: "";
+  display: block;
+  width: calc(var(--switch-h) - 4px);
+  height: calc(var(--switch-h) - 4px);
+  border-radius: 999px;
+  background: var(--cds-switch-knob);
+  box-shadow: var(--cds-shadow-sm);
+  transition: transform var(--cds-dur-snap) var(--cds-ease-overshoot);
+}
+
+.toggle[aria-checked="true"]::after {
+  transform: translateX(calc(var(--switch-h) * 0.8));
+}
+
+@media (forced-colors: active) {
+  .toggle {
+    padding: 1px;
+    border: 1px solid CanvasText;
+  }
+  .toggle[aria-checked="true"] {
+    border-color: Highlight;
+    background: Highlight;
+  }
+  .toggle::after {
+    background: CanvasText;
+  }
+  .toggle[aria-checked="true"]::after {
+    background: HighlightText;
+  }
+}
+
+/* Checkbox (shared-frame CA / Pb): a --cds-checkbox box (20 / 16, radius 5 / 4) with a 1px strong
+   border, stronger on hover; checked fills the accent (accent-hover on hover) under a 16px check.
+   A label follows gap-xs away, the box centred on its first line. */
+.checkbox {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--cds-gap-xs);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  text-align: start;
+}
+
+.checkbox:disabled {
+  opacity: var(--cds-opacity-disabled);
+}
+
+.checkbox:focus-visible {
+  box-shadow: none;
+}
+
+.checkbox-box {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--cds-checkbox);
+  height: var(--cds-checkbox);
+  border: 1px solid var(--cds-border-strong);
+  border-radius: var(--cds-checkbox-radius);
+  color: var(--cds-on-accent);
+}
+
+.checkbox-box:not(:only-child) {
+  margin-top: calc((1lh - var(--cds-checkbox)) / 2);
+}
+
+.checkbox:hover:not(:disabled) > .checkbox-box {
+  border-color: var(--cds-border-stronger);
+}
+
+.checkbox:is([aria-checked="true"], [aria-checked="mixed"]) > .checkbox-box {
+  border-color: transparent;
+  background: var(--cds-fill-accent);
+}
+
+/* Minus's place: a bar half the box wide. */
+.checkbox-mixed {
+  width: 50%;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.checkbox:is([aria-checked="true"], [aria-checked="mixed"]):hover:not(:disabled) > .checkbox-box {
+  border-color: transparent;
+  background: var(--cds-fill-accent-hover);
+}
+
+.checkbox:focus-visible > .checkbox-box {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+/* shared-frame: Check / Minus at sm, bold, sized to the box's glyph. */
+.checkbox-box > [data-cds="Icon"] {
+  font-size: var(--cds-checkbox-glyph);
+  font-weight: 700;
+}
+
+/* ---------------------------------------------------------------------------
+   Status, progress, placeholders */
+
+/* 6px status dot (shared-styles-Bl9zqrv-.css .status-dot): ready / unread accent, awaiting
+   (blocked) fill-warning, running text-muted blinking. The package has no idle color; idle here
+   is better-codex's own (MCP status rows), the sidebar renders no dot for idle rows. Running and
+   clay dots share one phase across the page (StatusDot sets startTime 0). */
+.status-dot {
+  display: inline-block;
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--cds-alpha-4);
+}
+
+.status-dot[data-kind="running"] {
+  background: var(--cds-text-muted);
+  animation: dframe-dot-blink 1.2s ease-in-out infinite;
+}
+
+.status-dot[data-kind="unread"],
+.status-dot[data-kind="ready"] {
+  background: var(--cds-fill-accent);
+}
+
+.status-dot[data-kind="blocked"] {
+  background: var(--cds-fill-warning);
+}
+
+.status-dot[data-kind="error"] {
+  background: var(--cds-fill-danger);
+}
+
+.status-dot[data-kind="clay"] {
+  background: var(--cds-clay);
+  animation: dframe-clay-breathe 3s ease-in-out infinite;
+}
+
+/* Dots (c4c72d232): three 3px alpha-70% dots in a 16px box, lit in turn every 1.8s. */
+.dots {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 16px;
+  height: 16px;
+  padding: 0 2px;
+  line-height: 0;
+}
+
+.dots > i {
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--cds-alpha-7);
+  opacity: 0.2857;
+  animation: cds-dot-pulse 1.8s linear infinite;
+}
+
+.dots > i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.dots > i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* CDS Spinner (shared-frame): a border track under a conic arc masked into a ring, 1s a turn;
+   muted on the border color unless it inherits the text color. */
+.spinner {
+  --spinner-w: 1.5px;
+  --spinner-ink: var(--cds-text-muted);
+  --spinner-track: var(--cds-border);
+  position: relative;
+  display: inline-block;
+  flex: none;
+  vertical-align: middle;
+}
+
+.spinner[data-inherit] {
+  --spinner-ink: currentColor;
+  --spinner-track: color-mix(in srgb, currentColor 25%, transparent);
+}
+
+/* A labelled spinner is a status region; the spinner itself is decorative. */
+.spinner-status {
+  line-height: 0;
+}
+
+.spinner::before,
+.spinner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+
+.spinner::before {
+  border: var(--spinner-w) solid var(--spinner-track);
+}
+
+.spinner::after {
+  background: conic-gradient(transparent 40%, var(--spinner-ink));
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - var(--spinner-w)), #000 calc(100% - var(--spinner-w) + 0.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - var(--spinner-w)), #000 calc(100% - var(--spinner-w) + 0.5px));
+  animation: spin 1s linear infinite;
+}
+
+/* SkeletonGroup (W17, shared-frame): hold=delayed keeps the group transparent until
+   --placeholder-reveal-delay (.5s; the transcript sets 2s), then fades it in over .15s, so a
+   quick load never flashes. Lines are 1em bars that start breathing (1 -> .6, 2s) once
+   revealed, each 90ms behind the last. */
+.skeleton {
+  --skel-reveal-end: calc(var(--placeholder-reveal-delay) + 0.15s);
+  display: grid;
+  gap: 10px;
+}
+
+.skeleton[data-hold="delayed"] {
+  animation: cds-placeholder-reveal 0.15s ease-out var(--placeholder-reveal-delay) backwards;
+}
+
+.skeleton-line {
+  display: block;
+  height: 1em;
+  max-width: 100%;
+  border-radius: var(--cds-radius);
+  background: var(--cds-skeleton-base);
+  animation: cds-skeleton-breathe 2s ease-in-out calc(var(--skel-reveal-end) + var(--i, 0) * 90ms) infinite;
+}
+
+.skeleton-line:nth-child(3n + 1) {
+  width: 92%;
+}
+
+.skeleton-line:nth-child(3n + 2) {
+  width: 74%;
+}
+
+.skeleton-line:nth-child(3n) {
+  width: 56%;
+}
+
+/* ShimmerText (W17, shared-frame Aj): Chromium (the desktop app, Chrome, Edge) lays a clone over
+   the text whose ::after band sweeps through a text mask; elsewhere the text itself carries a
+   400% background-clip gradient. 3s, parked 0–15% and 85–100%. Default: primary with a 30%-white
+   peak (dark: secondary with a primary peak); secondary and muted follow suit. */
+.shimmer {
+  --st-base: var(--cds-text-primary);
+  --st-peak: color-mix(in srgb, var(--cds-text-primary) 30%, white);
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  color: var(--st-base);
+  background-image: linear-gradient(120deg, var(--st-base) 37.5%, var(--st-peak) 50%, var(--st-base) 62.5%);
+  background-size: 400% 100%;
+  background-position: 83.333% 0;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: cds-shimmer-text-shine 3s linear infinite;
+}
+
+.shimmer[data-variant="secondary"] {
+  --st-base: var(--cds-text-secondary);
+  --st-peak: color-mix(in srgb, var(--cds-text-secondary) 30%, white);
+}
+
+.dark .shimmer {
+  --st-base: var(--cds-text-secondary);
+  --st-peak: var(--cds-text-primary);
+}
+
+.dark .shimmer[data-variant="secondary"] {
+  --st-base: var(--cds-text-muted);
+  --st-peak: color-mix(in srgb, var(--cds-text-muted) 30%, white);
+}
+
+.shimmer-clone {
+  display: none;
+}
+
+@supports (-webkit-mask-clip: text) and (-webkit-app-region: drag) {
+  .shimmer {
+    background: none;
+    -webkit-text-fill-color: var(--st-base);
+    animation: none;
+  }
+
+  .shimmer-clone {
+    position: absolute;
+    inset: 0;
+    display: block;
+    box-sizing: border-box;
+    padding: inherit;
+    overflow: clip;
+    white-space: inherit;
+    text-overflow: inherit;
+    pointer-events: none;
+    user-select: none;
+    -webkit-text-fill-color: transparent;
+    -webkit-mask-image: linear-gradient(#000 0 0);
+    -webkit-mask-clip: text;
+  }
+
+  .shimmer-clone::after {
+    content: "";
+    position: absolute;
+    inset: 0 -300% 0 0;
+    translate: -62.5%;
+    background-image: linear-gradient(120deg, transparent 37.5%, var(--st-peak) 50%, transparent 62.5%);
+    animation: cds-shimmer-text-band 3s linear infinite;
+  }
+}
+
+/* Drop scrim (W17, ChatComposerDropScrim): a file dragged over the window blurs the page by 12px
+   under 60% page color, inside a 14px-inset card with a 2px accent ring; the glow follows 80ms
+   later and the Image / Files / Folder glyphs rise 12px (60 / 0 / 120ms). */
+.drop-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  pointer-events: none;
+}
+
+.drop-scrim::before,
+.drop-scrim::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  animation: cds-fade-in 0.15s cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+
+.drop-scrim::before {
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+.drop-scrim::after {
+  background: var(--cds-page-bg);
+  opacity: 0.6;
+}
+
+.drop-scrim-ring {
+  position: absolute;
+  z-index: 1;
+  inset: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cds-gap-sm);
+  border-radius: var(--cds-radius-card);
+  box-shadow: var(--cds-shadow-drop-ring);
+  animation: cds-drop-ring-in 0.15s cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+
+.drop-scrim-ring::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 24px 0 color-mix(in srgb, var(--cds-fill-accent) 20%, transparent);
+  animation: cds-fade-in 0.2s cubic-bezier(0.215, 0.61, 0.355, 1) 0.08s backwards;
+}
+
+.drop-scrim-icons {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--cds-gap-md);
+  color: var(--cds-fill-accent);
+}
+
+.drop-scrim-icons > :nth-child(1) {
+  rotate: -14deg;
+}
+
+.drop-scrim-icons > :nth-child(2) {
+  translate: 0 -12px;
+}
+
+.drop-scrim-icons > :nth-child(3) {
+  rotate: 14deg;
+}
+
+.drop-rise {
+  display: inline-flex;
+  animation: cds-drop-icon-rise 0.22s cubic-bezier(0.215, 0.61, 0.355, 1) var(--rise-delay, 0ms) backwards;
+}
+
+.drop-scrim-label {
+  color: var(--cds-text-accent);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.drop-scrim-note {
+  max-width: 66%;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-align: center;
+}
+
+/* Drop panel: the same ring inside the composer card. Off target it is a 1px dashed line, on
+   target the solid ring and glow cross in (60ms); leaving, it shrinks to .95 and fades (.2s). */
+.drop-panel {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  transition:
+    opacity 0.2s,
+    transform 0.2s;
+  animation: cds-drop-ring-in 0.15s cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+
+.drop-panel[data-leaving] {
+  opacity: 0;
+  transform: scale(0.95);
+}
+
+.drop-panel::before,
+.drop-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  transition: opacity var(--cds-dur-fast);
+}
+
+.drop-panel::before {
+  border: 1px dashed var(--cds-fill-accent);
+}
+
+.drop-panel::after {
+  box-shadow: var(--cds-shadow-drop-ring), inset 0 0 24px 0 color-mix(in srgb, var(--cds-fill-accent) 20%, transparent);
+  opacity: 0;
+}
+
+.drop-panel[data-target="on"]::before {
+  opacity: 0;
+}
+
+.drop-panel[data-target="on"]::after {
+  opacity: 1;
+}
+
+/* Image preview (W17, cd5136de8): viewImage() / closeImage() name the thumbnail and the big image
+   chat-image-preview and morph between them (.35s open, .25s close); the pair's corners, inset
+   and shadow travel with it. A thumbnail scrolled out of view fades out in place; without a
+   thumbnail the page cross-fades (.18s). Every other view-transition-name sits out meanwhile. */
+::view-transition-group(chat-image-preview) {
+  animation-duration: 0.35s;
+  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+::view-transition-image-pair(chat-image-preview) {
+  isolation: auto;
+  overflow: clip;
+  animation: 0.35s cubic-bezier(0.32, 0.72, 0, 1) both vt-image-preview-decoration-in;
+}
+
+::view-transition-old(chat-image-preview),
+::view-transition-new(chat-image-preview) {
+  mix-blend-mode: normal;
+  object-fit: cover;
+  width: 100%;
+  height: 100%;
+  animation: none;
+}
+
+html.vt-image-preview-closing::view-transition-group(chat-image-preview) {
+  animation-duration: 0.25s;
+}
+
+html.vt-image-preview-closing::view-transition-image-pair(chat-image-preview) {
+  animation-name: vt-image-preview-decoration-out;
+  animation-duration: 0.25s;
+}
+
+html:not(.vt-image-preview-closing)::view-transition-old(chat-image-preview),
+html.vt-image-preview-closing::view-transition-new(chat-image-preview) {
+  display: none;
+}
+
+html.vt-image-preview-no-origin::view-transition-group(chat-image-preview) {
+  animation-name: vt-image-preview-fade-out;
+}
+
+html.vt-image-preview-active :not(html) {
+  view-transition-name: none !important;
+}
+
+html.vt-image-preview-active::view-transition-group(root) {
+  animation-duration: 0.35s !important;
+}
+
+html.vt-image-preview-active.vt-image-preview-closing::view-transition-group(root) {
+  animation-duration: 0.25s !important;
+}
+
+html.vt-image-preview-active.vt-image-preview-crossfade::view-transition-group(root) {
+  animation-duration: 0.18s !important;
+}
+
+/* ---------------------------------------------------------------------------
+   Scroll-driven fades (W12, c6a992d55). A 7-step alpha mask opens over --cds-scroll-fade-size
+   (28px) only on an edge you can scroll toward, and only while that axis overflows; the
+   scroll padding keeps a focused row clear of it. Without scroll timelines nothing fades. */
+
+.scroll-fade-y,
+.menu-scroll {
+  scroll-padding-block: calc(var(--cds-scroll-fade-size) * var(--cds-scroll-fade-top-on)) calc(var(--cds-scroll-fade-size) * var(--cds-scroll-fade-bottom-on));
+}
+
+.scroll-fade-x {
+  scroll-padding-left: calc(var(--cds-scroll-fade-size) * var(--cds-scroll-fade-left-on));
+  scroll-padding-right: calc(var(--cds-scroll-fade-size) * var(--cds-scroll-fade-right-on));
+}
+
+.scroll-fade {
+  scroll-padding: calc(var(--cds-scroll-fade-size) * var(--cds-scroll-fade-top-on)) calc(var(--cds-scroll-fade-size) * var(--cds-scroll-fade-right-on)) calc(var(--cds-scroll-fade-size) * var(--cds-scroll-fade-bottom-on)) calc(var(--cds-scroll-fade-size) * var(--cds-scroll-fade-left-on));
+}
+
+@supports (animation-timeline: scroll()) {
+  .scroll-fade-y,
+  .menu-scroll,
+  .scroll-fade {
+    --cds-scroll-fade-top: calc(var(--cds-scroll-fade-top-raw) * var(--cds-scroll-fade-y-active) * var(--cds-scroll-fade-top-on));
+    --cds-scroll-fade-bottom: calc(var(--cds-scroll-fade-bottom-raw) * var(--cds-scroll-fade-y-active) * var(--cds-scroll-fade-bottom-on));
+  }
+
+  .scroll-fade-x,
+  .scroll-fade {
+    --cds-scroll-fade-left: calc(var(--cds-scroll-fade-left-raw) * var(--cds-scroll-fade-x-active) * var(--cds-scroll-fade-left-on));
+    --cds-scroll-fade-right: calc(var(--cds-scroll-fade-right-raw) * var(--cds-scroll-fade-x-active) * var(--cds-scroll-fade-right-on));
+  }
+
+  .scroll-fade-y,
+  .menu-scroll {
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent,
+      #0000000d calc(var(--cds-scroll-fade-top) * 0.15),
+      #00000026 calc(var(--cds-scroll-fade-top) * 0.3),
+      #0000004d calc(var(--cds-scroll-fade-top) * 0.45),
+      #00000080 calc(var(--cds-scroll-fade-top) * 0.6),
+      #000000b3 calc(var(--cds-scroll-fade-top) * 0.75),
+      #000000d9 calc(var(--cds-scroll-fade-top) * 0.87),
+      #000 var(--cds-scroll-fade-top),
+      #000 calc(100% - var(--cds-scroll-fade-bottom)),
+      #000000d9 calc(100% - var(--cds-scroll-fade-bottom) * 0.87),
+      #000000b3 calc(100% - var(--cds-scroll-fade-bottom) * 0.75),
+      #00000080 calc(100% - var(--cds-scroll-fade-bottom) * 0.6),
+      #0000004d calc(100% - var(--cds-scroll-fade-bottom) * 0.45),
+      #00000026 calc(100% - var(--cds-scroll-fade-bottom) * 0.3),
+      #0000000d calc(100% - var(--cds-scroll-fade-bottom) * 0.15),
+      transparent
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent,
+      #0000000d calc(var(--cds-scroll-fade-top) * 0.15),
+      #00000026 calc(var(--cds-scroll-fade-top) * 0.3),
+      #0000004d calc(var(--cds-scroll-fade-top) * 0.45),
+      #00000080 calc(var(--cds-scroll-fade-top) * 0.6),
+      #000000b3 calc(var(--cds-scroll-fade-top) * 0.75),
+      #000000d9 calc(var(--cds-scroll-fade-top) * 0.87),
+      #000 var(--cds-scroll-fade-top),
+      #000 calc(100% - var(--cds-scroll-fade-bottom)),
+      #000000d9 calc(100% - var(--cds-scroll-fade-bottom) * 0.87),
+      #000000b3 calc(100% - var(--cds-scroll-fade-bottom) * 0.75),
+      #00000080 calc(100% - var(--cds-scroll-fade-bottom) * 0.6),
+      #0000004d calc(100% - var(--cds-scroll-fade-bottom) * 0.45),
+      #00000026 calc(100% - var(--cds-scroll-fade-bottom) * 0.3),
+      #0000000d calc(100% - var(--cds-scroll-fade-bottom) * 0.15),
+      transparent
+    );
+    animation-name: cds-scroll-fade-top, cds-scroll-fade-bottom, cds-scroll-fade-y-active;
+    animation-timing-function: linear;
+    animation-fill-mode: both, both, none;
+    animation-duration: auto;
+    animation-timeline: scroll(self);
+    animation-range:
+      0px var(--cds-scroll-fade-size),
+      calc(100% - var(--cds-scroll-fade-size)) 100%,
+      0px 101%;
+  }
+
+  .scroll-fade-x {
+    -webkit-mask-image: linear-gradient(
+      to right,
+      transparent,
+      #0000000d calc(var(--cds-scroll-fade-left) * 0.15),
+      #00000026 calc(var(--cds-scroll-fade-left) * 0.3),
+      #0000004d calc(var(--cds-scroll-fade-left) * 0.45),
+      #00000080 calc(var(--cds-scroll-fade-left) * 0.6),
+      #000000b3 calc(var(--cds-scroll-fade-left) * 0.75),
+      #000000d9 calc(var(--cds-scroll-fade-left) * 0.87),
+      #000 var(--cds-scroll-fade-left),
+      #000 calc(100% - var(--cds-scroll-fade-right)),
+      #000000d9 calc(100% - var(--cds-scroll-fade-right) * 0.87),
+      #000000b3 calc(100% - var(--cds-scroll-fade-right) * 0.75),
+      #00000080 calc(100% - var(--cds-scroll-fade-right) * 0.6),
+      #0000004d calc(100% - var(--cds-scroll-fade-right) * 0.45),
+      #00000026 calc(100% - var(--cds-scroll-fade-right) * 0.3),
+      #0000000d calc(100% - var(--cds-scroll-fade-right) * 0.15),
+      transparent
+    );
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      #0000000d calc(var(--cds-scroll-fade-left) * 0.15),
+      #00000026 calc(var(--cds-scroll-fade-left) * 0.3),
+      #0000004d calc(var(--cds-scroll-fade-left) * 0.45),
+      #00000080 calc(var(--cds-scroll-fade-left) * 0.6),
+      #000000b3 calc(var(--cds-scroll-fade-left) * 0.75),
+      #000000d9 calc(var(--cds-scroll-fade-left) * 0.87),
+      #000 var(--cds-scroll-fade-left),
+      #000 calc(100% - var(--cds-scroll-fade-right)),
+      #000000d9 calc(100% - var(--cds-scroll-fade-right) * 0.87),
+      #000000b3 calc(100% - var(--cds-scroll-fade-right) * 0.75),
+      #00000080 calc(100% - var(--cds-scroll-fade-right) * 0.6),
+      #0000004d calc(100% - var(--cds-scroll-fade-right) * 0.45),
+      #00000026 calc(100% - var(--cds-scroll-fade-right) * 0.3),
+      #0000000d calc(100% - var(--cds-scroll-fade-right) * 0.15),
+      transparent
+    );
+    animation-name: cds-scroll-fade-left, cds-scroll-fade-right, cds-scroll-fade-x-active;
+    animation-timing-function: linear;
+    animation-fill-mode: both, both, none;
+    animation-duration: auto;
+    animation-timeline: scroll(self inline);
+    animation-range:
+      0px var(--cds-scroll-fade-size),
+      calc(100% - var(--cds-scroll-fade-size)) 100%,
+      0px 101%;
+  }
+
+  .scroll-fade {
+    -webkit-mask-image:
+      linear-gradient(
+        to bottom,
+        transparent,
+        #0000000d calc(var(--cds-scroll-fade-top) * 0.15),
+        #00000026 calc(var(--cds-scroll-fade-top) * 0.3),
+        #0000004d calc(var(--cds-scroll-fade-top) * 0.45),
+        #00000080 calc(var(--cds-scroll-fade-top) * 0.6),
+        #000000b3 calc(var(--cds-scroll-fade-top) * 0.75),
+        #000000d9 calc(var(--cds-scroll-fade-top) * 0.87),
+        #000 var(--cds-scroll-fade-top),
+        #000 calc(100% - var(--cds-scroll-fade-bottom)),
+        #000000d9 calc(100% - var(--cds-scroll-fade-bottom) * 0.87),
+        #000000b3 calc(100% - var(--cds-scroll-fade-bottom) * 0.75),
+        #00000080 calc(100% - var(--cds-scroll-fade-bottom) * 0.6),
+        #0000004d calc(100% - var(--cds-scroll-fade-bottom) * 0.45),
+        #00000026 calc(100% - var(--cds-scroll-fade-bottom) * 0.3),
+        #0000000d calc(100% - var(--cds-scroll-fade-bottom) * 0.15),
+        transparent
+      ),
+      linear-gradient(
+        to right,
+        transparent,
+        #0000000d calc(var(--cds-scroll-fade-left) * 0.15),
+        #00000026 calc(var(--cds-scroll-fade-left) * 0.3),
+        #0000004d calc(var(--cds-scroll-fade-left) * 0.45),
+        #00000080 calc(var(--cds-scroll-fade-left) * 0.6),
+        #000000b3 calc(var(--cds-scroll-fade-left) * 0.75),
+        #000000d9 calc(var(--cds-scroll-fade-left) * 0.87),
+        #000 var(--cds-scroll-fade-left),
+        #000 calc(100% - var(--cds-scroll-fade-right)),
+        #000000d9 calc(100% - var(--cds-scroll-fade-right) * 0.87),
+        #000000b3 calc(100% - var(--cds-scroll-fade-right) * 0.75),
+        #00000080 calc(100% - var(--cds-scroll-fade-right) * 0.6),
+        #0000004d calc(100% - var(--cds-scroll-fade-right) * 0.45),
+        #00000026 calc(100% - var(--cds-scroll-fade-right) * 0.3),
+        #0000000d calc(100% - var(--cds-scroll-fade-right) * 0.15),
+        transparent
+      );
+    mask-image:
+      linear-gradient(
+        to bottom,
+        transparent,
+        #0000000d calc(var(--cds-scroll-fade-top) * 0.15),
+        #00000026 calc(var(--cds-scroll-fade-top) * 0.3),
+        #0000004d calc(var(--cds-scroll-fade-top) * 0.45),
+        #00000080 calc(var(--cds-scroll-fade-top) * 0.6),
+        #000000b3 calc(var(--cds-scroll-fade-top) * 0.75),
+        #000000d9 calc(var(--cds-scroll-fade-top) * 0.87),
+        #000 var(--cds-scroll-fade-top),
+        #000 calc(100% - var(--cds-scroll-fade-bottom)),
+        #000000d9 calc(100% - var(--cds-scroll-fade-bottom) * 0.87),
+        #000000b3 calc(100% - var(--cds-scroll-fade-bottom) * 0.75),
+        #00000080 calc(100% - var(--cds-scroll-fade-bottom) * 0.6),
+        #0000004d calc(100% - var(--cds-scroll-fade-bottom) * 0.45),
+        #00000026 calc(100% - var(--cds-scroll-fade-bottom) * 0.3),
+        #0000000d calc(100% - var(--cds-scroll-fade-bottom) * 0.15),
+        transparent
+      ),
+      linear-gradient(
+        to right,
+        transparent,
+        #0000000d calc(var(--cds-scroll-fade-left) * 0.15),
+        #00000026 calc(var(--cds-scroll-fade-left) * 0.3),
+        #0000004d calc(var(--cds-scroll-fade-left) * 0.45),
+        #00000080 calc(var(--cds-scroll-fade-left) * 0.6),
+        #000000b3 calc(var(--cds-scroll-fade-left) * 0.75),
+        #000000d9 calc(var(--cds-scroll-fade-left) * 0.87),
+        #000 var(--cds-scroll-fade-left),
+        #000 calc(100% - var(--cds-scroll-fade-right)),
+        #000000d9 calc(100% - var(--cds-scroll-fade-right) * 0.87),
+        #000000b3 calc(100% - var(--cds-scroll-fade-right) * 0.75),
+        #00000080 calc(100% - var(--cds-scroll-fade-right) * 0.6),
+        #0000004d calc(100% - var(--cds-scroll-fade-right) * 0.45),
+        #00000026 calc(100% - var(--cds-scroll-fade-right) * 0.3),
+        #0000000d calc(100% - var(--cds-scroll-fade-right) * 0.15),
+        transparent
+      );
+    -webkit-mask-composite: source-in;
+    mask-composite: intersect;
+    animation-name: cds-scroll-fade-top, cds-scroll-fade-bottom, cds-scroll-fade-left, cds-scroll-fade-right, cds-scroll-fade-y-active, cds-scroll-fade-x-active;
+    animation-timing-function: linear;
+    animation-fill-mode: both, both, both, both, none, none;
+    animation-duration: auto;
+    animation-timeline: scroll(self), scroll(self), scroll(self inline), scroll(self inline), scroll(self), scroll(self inline);
+    animation-range:
+      0px var(--cds-scroll-fade-size),
+      calc(100% - var(--cds-scroll-fade-size)) 100%,
+      0px var(--cds-scroll-fade-size),
+      calc(100% - var(--cds-scroll-fade-size)) 100%,
+      0px 101%,
+      0px 101%;
+  }
+}
+
+/* Fade strips (the Code transcript, dialogs): a sticky gradient band as the scroller's first /
+   last child, fading in over the first 28px of scroll / out over the last; page color by
+   default (a dialog's page is its surface). */
+.scroll-fade-strip-top,
+.scroll-fade-strip-bottom {
+  --strip-c: var(--cds-scroll-fade-strip-color, var(--cds-page-bg));
+  position: sticky;
+  inset-inline-start: 0;
+  z-index: 1;
+  /* In a flex column (.dialog) an overflow would squash a strip to nothing while its negative
+     margin stays, pulling the head (or the last 28px) out of scroll reach. */
+  flex: none;
+  height: var(--cds-scroll-fade-size);
+  pointer-events: none;
+  opacity: 0;
+}
+
+.scroll-fade-strip-top {
+  top: 0;
+  margin-bottom: calc(var(--cds-scroll-fade-size) * -1);
+  background: linear-gradient(
+    to bottom,
+    var(--strip-c),
+    color-mix(in srgb, var(--strip-c) 85%, transparent) 13%,
+    color-mix(in srgb, var(--strip-c) 50%, transparent) 40%,
+    color-mix(in srgb, var(--strip-c) 15%, transparent) 70%,
+    transparent
+  );
+}
+
+.scroll-fade-strip-bottom {
+  bottom: 0;
+  margin-top: calc(var(--cds-scroll-fade-size) * -1);
+  background: linear-gradient(
+    to top,
+    var(--strip-c),
+    color-mix(in srgb, var(--strip-c) 85%, transparent) 13%,
+    color-mix(in srgb, var(--strip-c) 50%, transparent) 40%,
+    color-mix(in srgb, var(--strip-c) 15%, transparent) 70%,
+    transparent
+  );
+}
+
+@supports (animation-timeline: scroll()) {
+  .scroll-fade-strip-top,
+  .scroll-fade-strip-bottom {
+    opacity: calc(var(--cds-scroll-fade-strip-raw) * var(--cds-scroll-fade-strip-active));
+    animation-timing-function: linear;
+    animation-fill-mode: both, none;
+    animation-duration: auto;
+    animation-timeline: scroll(), scroll();
+  }
+
+  .scroll-fade-strip-top {
+    animation-name: cds-scroll-fade-strip-in, cds-scroll-fade-strip-active;
+    animation-range:
+      0px var(--cds-scroll-fade-size),
+      0px 101%;
+  }
+
+  .scroll-fade-strip-bottom {
+    animation-name: cds-scroll-fade-strip-out, cds-scroll-fade-strip-active;
+    animation-range:
+      calc(100% - var(--cds-scroll-fade-size)) 100%,
+      0px 101%;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Usage ring (shared-8 EX): turned -90deg so the arc starts at the top; the arc eases its
+   dashoffset over 300ms (Tailwind transition-[stroke-dashoffset] duration-300). The track is
+   alpha-2 unless the caller passes its own (c227f4d5e). */
+
+.usage-ring {
+  flex: none;
+  transform: rotate(-90deg);
+}
+
+.usage-ring [data-ring-track] {
+  stroke: var(--cds-alpha-2);
+}
+
+.usage-ring [data-ring-arc] {
+  transition: stroke-dashoffset 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.usage-ring-labelled {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+}
+
+.usage-ring-labelled > * {
+  grid-area: 1 / 1;
+}
+
+.usage-ring-label,
+.urm__label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-variation-settings: var(--cds-font-wght-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--cds-text-primary);
+}
+
+/* ---------------------------------------------------------------------------
+   Usage Ring Meter (c403c4b83). Draw (a usage window's first showing on this machine) sweeps
+   the arc over 900ms overshoot while the track fades in and the glow flares; quiet is a 200ms
+   sweep. Warning / critical / limit beat once each. A reply starting to stream (≥ 15%) breathes
+   the ring and sends a 10% comet to the arc's end. Hovering the button around it lifts it 1.08.
+   Only with code_ring_motion on (设置 → 通用 → 外观 → 用量环动效); the label shares .usage-ring-label. */
+
+.urm {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--urm-size);
+  height: var(--urm-size);
+}
+
+.urm__hover,
+.urm__beat,
+.urm__breath {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+.urm__breath > * {
+  grid-area: 1 / 1;
+}
+
+.urm__glow,
+.urm__beat-glow,
+.urm__hover-glow {
+  position: absolute;
+  inset: calc(var(--urm-size) * -1);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--urm-color) 55%, transparent), transparent 62%);
+  pointer-events: none;
+}
+
+.urm__glow {
+  opacity: 0.06;
+}
+
+.urm__beat-glow,
+.urm__hover-glow {
+  opacity: 0;
+}
+
+.urm__hover {
+  transition: transform var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+.urm__hover-glow {
+  transition: opacity var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+@media (hover: hover) {
+  .btn:hover .urm__hover {
+    transform: scale(1.08);
+  }
+
+  .btn:hover .urm__hover-glow {
+    opacity: 0.23;
+  }
+}
+
+.urm__ring {
+  transform: rotate(-90deg);
+}
+
+.urm__ring circle {
+  fill: none;
+}
+
+.urm [data-ring-track] {
+  stroke: var(--cds-alpha-2);
+  transition: stroke var(--cds-dur-base) var(--cds-ease-out);
+}
+
+.urm [data-ring-arc] {
+  stroke: var(--urm-color);
+  stroke-linecap: round;
+  transition-property: stroke-dashoffset, stroke;
+  transition-duration: var(--cds-dur-sheet), var(--cds-dur-base);
+  transition-timing-function: var(--cds-ease-out);
+}
+
+.urm[data-entrance="draw"] [data-ring-arc] {
+  animation:
+    urm-arc-sweep calc(2 * var(--cds-dur-slow)) var(--cds-ease-overshoot) backwards,
+    urm-fade-in var(--cds-dur-snap) linear backwards;
+}
+
+.urm[data-entrance="draw"] [data-ring-track] {
+  animation: urm-fade-in var(--cds-dur-sheet) var(--cds-ease-out) 0.15s backwards;
+}
+
+.urm[data-entrance="draw"] .urm__glow {
+  animation: 1.2s linear backwards urm-draw-glow;
+}
+
+.urm[data-entrance="quiet"] [data-ring-arc] {
+  animation:
+    urm-arc-sweep var(--cds-dur-base) var(--cds-ease-out) backwards,
+    urm-fade-in var(--cds-dur-base) var(--cds-ease-out) backwards;
+}
+
+.urm[data-entrance="quiet"] [data-ring-track],
+.urm[data-entrance="quiet"] .urm__glow {
+  animation: urm-fade-in var(--cds-dur-base) var(--cds-ease-out) backwards;
+}
+
+.urm[data-beat="1"] .urm__beat {
+  animation: 2.3s linear urm-beat-warning;
+}
+
+.urm[data-beat="1"] .urm__beat-glow {
+  animation: 2.3s linear urm-beat-warning-glow;
+}
+
+.urm[data-beat="2"] .urm__beat {
+  animation: 1.45s linear urm-beat-critical;
+}
+
+.urm[data-beat="2"] .urm__beat-glow {
+  animation: 1.45s linear urm-beat-critical-glow;
+}
+
+.urm[data-beat="3"] .urm__beat {
+  animation: 2.45s linear urm-beat-limit;
+}
+
+.urm[data-beat="3"] .urm__beat-glow {
+  animation: 2.45s linear urm-beat-limit-glow;
+}
+
+.urm[data-shimmer] .urm__breath {
+  animation: 1.5s ease-in-out urm-breath;
+}
+
+.urm__comet {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+
+.urm__comet circle {
+  fill: none;
+  stroke: color-mix(in srgb, var(--urm-color) 28%, white);
+  stroke-linecap: round;
+}
+
+.urm[data-shimmer] .urm__comet {
+  animation:
+    2s linear urm-comet-travel,
+    2s linear urm-comet-fade;
+}
+
+/* Mini meter (session rail): 24 x 4 track, secondary fill. */
+.meter {
+  position: relative;
+  flex: none;
+  width: 24px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--cds-alpha-2);
+}
+
+.meter > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--cds-text-secondary);
+}
+
+/* ---------------------------------------------------------------------------
+   Toasts (CDS Toast, shared-19 qU / HU; the app's viewport, shared-23 uW): a stack 16px in from
+   the bottom right, 360 wide. The newest card leads; the two before it sit behind at its height,
+   14px higher and 4% smaller each, contents hidden. Cards rise in from below and leave fading to
+   .85. rounded-card bg-surface-3 shadow-panel-md; warning / danger tint the card, ring it and
+   take its text, the neutral glyph is secondary. Content: gap-sm px-lg py-md text-body. */
+
+/* --toast-clearance lifts it over a composer dock it would cover (ui.tsx useDockClearance). */
+.toasts {
+  position: fixed;
+  right: calc(env(safe-area-inset-right, 0px) + 16px);
+  bottom: calc(max(env(safe-area-inset-bottom, 0px), var(--toast-clearance, 0px)) + 16px);
+  z-index: var(--z-toast);
+  width: 360px;
+  max-width: calc(100vw - 32px);
+}
+
+.toast {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  overflow: hidden;
+  border-radius: var(--cds-radius-card);
+  background-color: var(--cds-surface-3);
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-md);
+  color: var(--cds-text-primary);
+  transform: translateY(calc(var(--toast-index, 0) * -14px)) scale(calc(1 - var(--toast-index, 0) * 0.04));
+  transform-origin: bottom;
+  transition:
+    transform var(--cds-dur-base) var(--cds-ease-out),
+    opacity var(--cds-dur-base) var(--cds-ease-out);
+  animation: toast-in var(--cds-dur-base) var(--cds-ease-out);
+}
+
+/* The leading card sets the stack's height; the ones behind take it. */
+.toast[data-front] {
+  position: relative;
+}
+
+.toast[data-behind] {
+  top: 0;
+}
+
+.toast[data-ending] {
+  opacity: 0;
+  transform: translateY(calc(var(--toast-index, 0) * -14px)) scale(0.85);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    translate: 0 100%;
+  }
+}
+
+.toast-warning,
+.toast-danger {
+  background-image: linear-gradient(var(--toast-tint), var(--toast-tint));
+  box-shadow: inset 0 0 0 1px var(--toast-ring);
+}
+
+.toast-warning {
+  --toast-tint: var(--cds-bg-warning);
+  --toast-ring: var(--cds-border-warning);
+  color: var(--cds-text-warning);
+}
+
+.toast-danger {
+  --toast-tint: var(--cds-bg-danger);
+  --toast-ring: var(--cds-border-danger);
+  color: var(--cds-text-danger);
+}
+
+.toast-body {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cds-gap-sm);
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  transition:
+    opacity var(--cds-dur-base) var(--cds-ease-out),
+    visibility var(--cds-dur-base) var(--cds-ease-out);
+}
+
+.toast[data-behind] .toast-body {
+  visibility: hidden;
+  opacity: 0;
+}
+
+/* As tall as its 20px glyph (shrink-0): a one-line toast is 36, not a line high. */
+.toast-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.toast-neutral .toast-icon {
+  color: var(--cds-text-secondary);
+}
+
+.toast-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
+}
+
+.toast-title {
+  font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+/* -mx-1 -mb-1 -mt-0.5 p-1 rounded, the 16px X. */
+.toast-close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  margin: -2px -4px -4px;
+  padding: 4px;
+  border-radius: var(--cds-radius);
+  color: inherit;
+  transition: background-color var(--cds-dur-fast);
+}
+
+.toast-close:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.toast-close:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-focus-shadow);
+}
+
+:root[data-reduce-motion] .toast,
+:root[data-reduce-motion] .toast-body {
+  transition: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Reduced motion and forced colors (07 §7.4). The global rule in tokens.css shortens every
+   animation; these are the pieces that also drop a transition or a decoration, as CDS does. */
+
+@media (prefers-reduced-motion: reduce) {
+  .btn::before,
+  .btn:active:not(:disabled)::before,
+  .dialog-backdrop,
+  .dialog,
+  .toggle::after,
+  .urm [data-ring-arc],
+  .urm [data-ring-track],
+  .urm__hover,
+  .urm__hover-glow {
+    transition: none;
+  }
+
+  .btn:hover .urm__hover {
+    transform: none;
+  }
+
+  .urm__comet,
+  .shimmer-clone {
+    display: none;
+  }
+
+  .shimmer {
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    animation: none;
+  }
+
+  .dots > i,
+  .spinner::after {
+    animation: none;
+  }
+}
+
+[data-reduce-motion="true"] .btn::before,
+[data-reduce-motion="true"] .btn:active:not(:disabled)::before,
+[data-reduce-motion="true"] .dialog-backdrop,
+[data-reduce-motion="true"] .dialog,
+[data-reduce-motion="true"] .toggle::after,
+[data-reduce-motion="true"] .urm [data-ring-arc],
+[data-reduce-motion="true"] .urm [data-ring-track],
+[data-reduce-motion="true"] .urm__hover,
+[data-reduce-motion="true"] .urm__hover-glow {
+  transition: none;
+}
+
+[data-reduce-motion="true"] .btn:hover .urm__hover {
+  transform: none;
+}
+
+[data-reduce-motion="true"] .urm__comet,
+[data-reduce-motion="true"] .shimmer-clone {
+  display: none;
+}
+
+[data-reduce-motion="true"] .shimmer {
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  animation: none;
+}
+
+[data-reduce-motion="true"] .dots > i,
+[data-reduce-motion="true"] .spinner::after {
+  animation: none;
+}
+
+@media (forced-colors: active) {
+  .shimmer-clone {
+    display: none;
+  }
+
+  .shimmer {
+    background: none;
+    animation: none;
+    -webkit-text-fill-color: CanvasText;
+  }
+}

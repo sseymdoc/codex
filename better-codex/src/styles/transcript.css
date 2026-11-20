@@ -1,0 +1,4997 @@
+/* The transcript, after the Code tab of Claude Desktop 2.42304.0.0 at compact density with the
+   server switches off: prose (c6a992d55 .prose), the code fence (c19e90103), tool rows and their
+   cards (c425fb3cf / cb6930dae), the working line, chapters (c96d752d0 / cf74bc599 /
+   shared-styles), diffs, message actions, jump-to-latest and the image preview. Sizes follow
+   html[data-chat-text-size] through [data-text-size] (tokens.css); the column follows
+   html[data-transcript-width] through --max-content-width. */
+
+/* Your message waiting for its turn stands where that turn's prompt will: the turn gap under the
+   row before (c4de0b325 Uhe "turn": mt-6, compact mt-5), none as the first row. */
+.pending-message {
+  margin-block: 24px 16px;
+}
+
+[data-density="compact"] .pending-message {
+  margin-top: 20px;
+}
+
+.pending-message:first-child {
+  margin-top: 0;
+}
+
+.pending-message-status {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+}
+
+/* Registered like the original, so `.75em` resolves once on the prose root. */
+@property --_prose-flow {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+/* ---------------------------------------------------------------------------
+   Layout: the column is the measure plus a 32px gutter each side (shared-6 sg / dg); rows sit
+   --chat-turn-gap apart, a turn your message opens 20px (comfortable 24px) under the last, and a
+   reply's items --chat-item-gap (.epitaxy-transcript-typography, c96d752d0 Snt). Where rows carry
+   the gap above them, as in the rows engine, the turn gap is the item row's: 20px, compact 16px
+   (c4de0b325 b6 over the typography's 0.75 line). */
+
+.transcript-wrap {
+  --chat-body: 14px;
+  --chat-leading: 1.42857;
+  --chat-item-gap: calc(var(--chat-body) * var(--chat-leading) * 0.5);
+  --chat-turn-gap: 20px;
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+[data-density="compact"] .transcript-wrap {
+  --chat-turn-gap: 16px;
+}
+
+:root[data-chat-text-size="s"] .transcript-wrap {
+  --chat-body: 13px;
+}
+
+:root[data-chat-text-size="l"] .transcript-wrap {
+  --chat-body: 15px;
+  --chat-leading: 1.46667;
+}
+
+/* The top fade strip is 32px (c4a70913c --epitaxy-top-fade-height), the bottom one 48px (c96d752d0
+   nat edgeFades). The scroller runs on under the dock by its height (--transcript-overlay, which
+   Transcript sets: nat bottomOverlay), so its scrollbar reaches the window's foot; scroll-padding
+   keeps what scrolls into view (a find hit) above the dock. c96d752d0: the scrollbar's gutter is
+   kept on both edges, so the rows don't shift as it comes and goes (a tool group unfolding). */
+.transcript {
+  --transcript-overlay: 0px;
+  height: calc(100% + var(--transcript-overlay));
+  overflow-y: auto;
+  overflow-anchor: none;
+  scrollbar-gutter: stable both-edges;
+  scroll-padding-bottom: var(--transcript-overlay);
+}
+
+/* c4a70913c: the top strip is 32px where scroll timelines run (without them it never shows). A
+   plain property, so it reaches the strip (the registered --cds-scroll-fade-size doesn't inherit)
+   and the code blocks' copy keys, which stick clear of it. */
+@supports (animation-timeline: scroll()) {
+  .transcript {
+    --epitaxy-top-fade-height: 32px;
+  }
+}
+
+.transcript > .scroll-fade-strip-top {
+  --cds-scroll-fade-size: var(--epitaxy-top-fade-height);
+}
+
+/* nat: the transcript's surface in a sticky strip behind the dock, so nothing scrolled under it
+   shows between its cards; over the rows' z-index 1 layers (the working mark). */
+.transcript::after {
+  content: "";
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: block;
+  height: var(--transcript-overlay);
+  margin-top: calc(-1 * var(--transcript-overlay));
+  background: var(--cds-page-bg);
+  pointer-events: none;
+}
+
+/* nat: the bottom strip sits on the dock's top edge (bottom: overlayPx). */
+.transcript > .scroll-fade-strip-bottom {
+  --cds-scroll-fade-size: 48px;
+  bottom: var(--transcript-overlay);
+}
+
+/* c96d752d0 m9: the rows' foot is 48px (16 compact) over the dock's height. */
+.transcript-list {
+  max-width: calc(var(--max-content-width) + 2 * var(--chat-gutter));
+  margin: 0 auto;
+  padding: 8px var(--chat-gutter) calc(48px + var(--transcript-overlay));
+}
+
+/* c96d752d0 Cw: older pages load into a 40px band at the top — a spinner while they come, or
+   the failure with 重试. */
+.older-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+}
+
+.older-failed {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.transcript-loading {
+  display: grid;
+  gap: 28px;
+  max-width: calc(var(--max-content-width) + 2 * var(--chat-gutter));
+  margin: 0 auto;
+  padding: 32px var(--chat-gutter);
+}
+
+.transcript-loading .skeleton:first-of-type {
+  justify-items: end;
+}
+
+/* cc0a875c8: the centred empty / failed state. */
+.transcript-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cds-gap-md);
+  min-height: 100%;
+  padding: var(--cds-pad-lg) var(--cds-pad-lg) calc(var(--cds-pad-lg) + var(--transcript-overlay));
+  text-align: center;
+}
+
+.transcript-empty-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.transcript-empty-title,
+.transcript-empty-body {
+  max-width: 36ch;
+  margin: 0;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
+}
+
+.transcript-empty-title {
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.transcript-empty-body {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.transcript-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+/* c96d752d0 Z9: with nothing loaded but older history, a pill 12px from the top loads it. */
+.earlier-pill {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 21;
+  translate: -50% 0;
+}
+
+.earlier-load.btn {
+  --btn-bg: var(--cds-surface-1);
+}
+
+.earlier-status {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 var(--cds-pad-xs);
+  border-radius: var(--cds-radius);
+  background: var(--cds-surface-2);
+  box-shadow:
+    inset 0 0 0 1px var(--cds-fill-secondary-ring),
+    0 1px 2px 0 #0000000d;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.transcript-list > :is(.turn, .thread-rows) + :is(.turn, .thread-rows) {
+  margin-top: var(--chat-turn-gap);
+}
+
+/* A turn your message opens sits mt-6, compact mt-5, under the row before it (c80ec48f8 Pr br). */
+.transcript-list > :is(.turn, .thread-rows) + .turn:has(> .turn-prompt) {
+  margin-top: 24px;
+}
+
+[data-density="compact"] .transcript-list > :is(.turn, .thread-rows) + .turn:has(> .turn-prompt) {
+  margin-top: 20px;
+}
+
+.turn {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* The reply sits gap-xs under your message, its hover row included: the rows engine gives a
+   reply's first row mt-xs (c4a9ee384 uf → c80ec48f8 Pr), not a turn gap. */
+.turn-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--chat-item-gap);
+  margin-bottom: var(--cds-gap-xs);
+}
+
+/* No reply yet: the next row brings its own gap. */
+.turn-prompt:has(+ .reply-row > .agent-flow:empty) {
+  margin-bottom: 0;
+}
+
+.agent-flow:empty {
+  display: none;
+}
+
+/* ---------------------------------------------------------------------------
+   User message (shared-2 UX): a full-width row that right-aligns the bubble, so 85% is of the
+   column, not of the text; r = radius + 4, 8 x 12; its text the transcript's body (c96d752d0 lR
+   text-body: 14/20 at m). Over 1200 characters it folds to 16rem under a 3rem fade (c96d752d0 fz). */
+
+.user-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--cds-gap-xs);
+  width: 100%;
+  min-width: 0;
+  margin-inline-start: auto;
+}
+
+.user-row[data-entering] {
+  transform-origin: 100% 50%;
+  animation: code-user-bubble-enter var(--cds-dur-slow) var(--cds-ease-overshoot) both;
+}
+
+.user-bubble {
+  --cds-assistant-message-text-inset: 0px;
+  --cds-assistant-message-text-stop: 0px;
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+  max-width: 85%;
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+  border-radius: var(--cds-radius-bubble);
+  background: var(--cds-bg-user-message);
+  color: var(--cds-text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--chat-body);
+  line-height: var(--chat-leading);
+  font-weight: 400;
+  font-variation-settings: var(--cds-font-wght-regular);
+  overflow-wrap: break-word;
+  user-select: text;
+}
+
+/* A reply to mid-turn questions: Claude's answered-question receipt (cb6930dae da, c6a992d55
+   .epitaxy-question-receipt): an outlined rounded-lg card up to 480px on the reply's side, each
+   question medium in primary ink over its answer in secondary, 2px apart, 12 x 16 in, questions a
+   border apart; it fades in over .2s. Newlines fold to spaces, as Claude flattens both to one line. */
+.user-row[data-reply] {
+  align-items: flex-start;
+}
+
+.question-receipt {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 480px;
+  overflow: clip;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px var(--cds-border);
+  font-family: var(--font-sans);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  user-select: text;
+}
+
+.question-receipt > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+}
+
+.question-receipt > div + div {
+  border-top: 1px solid var(--cds-border);
+}
+
+.question-receipt-q {
+  color: var(--cds-text-primary);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  overflow-wrap: break-word;
+  unicode-bidi: plaintext;
+}
+
+.question-receipt-a {
+  color: var(--cds-text-secondary);
+  overflow-wrap: anywhere;
+  unicode-bidi: plaintext;
+}
+
+.question-receipt[data-enter] {
+  animation: epitaxy-approval-inline-enter 0.2s ease-out;
+}
+
+/* Send now lands with code-reply-flash-accent under the text (shared-styles 2137). */
+.user-bubble[data-flash]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: code-reply-flash-accent 1.2s ease-out;
+}
+
+.user-text {
+  white-space: pre-wrap;
+}
+
+.user-text[data-folded] {
+  max-height: 16rem;
+  overflow: clip;
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 3rem), transparent);
+  mask-image: linear-gradient(to bottom, black calc(100% - 3rem), transparent);
+}
+
+.user-fold.btn {
+  align-self: flex-start;
+  margin-inline-start: calc(-1 * var(--cds-pad-md));
+}
+
+.user-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.mention-chip {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--cds-alpha-1);
+  font-family: var(--font-mono);
+  font-size: var(--cds-font-size-code);
+}
+
+.user-images {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.user-image {
+  max-width: 220px;
+  max-height: 180px;
+  border-radius: var(--cds-radius-bubble);
+  box-shadow: 0 0 0 1px var(--cds-border);
+}
+
+.user-image[data-loading] {
+  display: block;
+  width: 120px;
+  height: 90px;
+  background: var(--cds-alpha-1);
+}
+
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: min(240px, 100%);
+  height: var(--cds-h-control);
+  padding: 0 var(--cds-pad-md);
+  border-radius: var(--cds-radius);
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+}
+
+/* A file's name on one line, cut short as SentFiles' cards cut theirs (its tooltip has it whole). */
+.attachment-chip > [data-cds="Icon"] {
+  flex: none;
+}
+
+.attachment-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A library file's chip (UserBubble) opens it in 资料库. */
+button.attachment-chip {
+  cursor: pointer;
+}
+
+button.attachment-chip:hover {
+  background: var(--cds-alpha-2);
+  color: var(--cds-text-primary);
+}
+
+/* c289d7154 J / K: the files a turn hands over (SentFiles), wrapping 8px apart; each a 36px
+   card at most 240px wide, r8, a 0.5px strong border and shadow-sm on surface-3, the border
+   stronger on hover; an 18px type badge (9px bold caps, at most 64px) before the name. */
+.sent-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sent-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: min(240px, 100%);
+  height: 36px;
+  padding: 0 8px;
+  overflow: hidden;
+  border: 0.5px solid var(--cds-border-strong);
+  border-radius: 8px;
+  background: var(--cds-surface-3);
+  box-shadow: var(--cds-shadow-sm);
+  font-family: var(--cds-font-sans);
+  text-align: start;
+  cursor: pointer;
+  transition: box-shadow 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+button.sent-file:hover {
+  border-color: var(--cds-border-stronger);
+}
+
+.sent-file-badge {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  max-width: 64px;
+  height: 18px;
+  padding: 0 4px;
+  overflow: hidden;
+  border: 0.5px solid var(--cds-border-strong);
+  border-radius: var(--cds-radius);
+  background: color-mix(in oklab, var(--cds-surface-3) 70%, transparent);
+  box-shadow: var(--cds-shadow-sm);
+  color: var(--cds-text-secondary);
+  font-size: 9px;
+  font-weight: 700;
+  font-variation-settings: var(--cds-font-wght-bold);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.sent-file-name {
+  display: flex;
+  min-width: 0;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.sent-file-name > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sent-file-name > :nth-child(2) {
+  flex-shrink: 0;
+}
+
+/* K's size: 11/13 caps after the name (under it on a square card). */
+.sent-file-size {
+  flex-shrink: 0;
+  min-width: 20px;
+  color: var(--cds-text-secondary);
+  font-size: 11px;
+  line-height: 13px;
+  text-transform: uppercase;
+}
+
+/* K square: once an image is among them, a 120px tile, the badge top left over the name, 12/16
+   in two lines at most, 10 x 8 padding. */
+.sent-file[data-square] {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 10px;
+  width: 120px;
+  min-width: 120px;
+  height: 120px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.sent-file[data-square] > .sent-file-badge {
+  align-self: flex-start;
+  max-width: none;
+}
+
+.sent-file-text {
+  min-width: 0;
+}
+
+.sent-file[data-square] .sent-file-size {
+  display: block;
+}
+
+.sent-file[data-square] .sent-file-name {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 16px;
+  overflow-wrap: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* Is: an image is the card's frame round the picture, 120px contained (natural: as large as it
+   is, up to 360px tall), zooming in; a breathing tile while it reads. */
+.sent-image {
+  display: block;
+  align-self: flex-start;
+  height: auto;
+  padding: 0;
+  max-width: min(100%, 480px);
+  cursor: zoom-in;
+}
+
+.sent-image[data-square] {
+  width: 120px;
+  height: 120px;
+}
+
+.sent-image > img {
+  display: block;
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
+}
+
+.sent-image > img[data-natural] {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 360px;
+}
+
+.sent-image > .skeleton,
+.sent-image > .skeleton > .skeleton-line {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
+
+/* cb6930dae Ls / Rs: sent media 8px down, video black with r8 up to 320 x 240 (natural: 480 x
+   360), audio its 12px name over a 320px player 4px apart; while looked for, a 120px tile (audio:
+   320 x 74). */
+.sent-video,
+.sent-audio,
+.sent-media-wait {
+  margin-top: 8px;
+}
+
+.sent-video {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 320px;
+  max-height: 240px;
+  border-radius: 8px;
+  background: #000;
+}
+
+.sent-video[data-natural] {
+  max-width: min(100%, 480px);
+  max-height: 360px;
+}
+
+.sent-audio {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  max-width: 320px;
+}
+
+.sent-audio > p {
+  margin: 0;
+  overflow: hidden;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sent-audio > audio {
+  display: block;
+  width: 100%;
+}
+
+.sent-media-wait {
+  width: 120px;
+  height: 120px;
+}
+
+.sent-media-wait[data-audio] {
+  width: 100%;
+  max-width: 320px;
+  height: 74px;
+}
+
+.sent-media-wait > .skeleton-line {
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+}
+
+/* c96d752d0 hI / JF: ✓ 已发送 under a message steered into the running turn. */
+.receipt {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: var(--cds-h-control);
+  padding-inline-start: 5px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  font-variant-numeric: tabular-nums;
+  animation: epitaxy-hint-fade-in 0.4s cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+
+.receipt-check {
+  display: inline-flex;
+  animation: epitaxy-check-draw 0.18s var(--cds-ease-out) both;
+}
+
+/* Hover rows (c425fb3cf v.msg): your message's under the bubble, a reply's under the reply
+   only (group/message-row); out over fast / ease-snap, in over snap after 100ms. */
+.row-actions,
+.msg-actions {
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  transition: opacity var(--cds-dur-fast) var(--cds-ease-snap);
+}
+
+.user-row:hover > .row-actions,
+.reply-row:hover > .msg-actions,
+:is(.row-actions, .msg-actions):focus-within {
+  opacity: 1;
+  transition-duration: var(--cds-dur-snap);
+  transition-delay: 100ms;
+}
+
+.action-reason {
+  display: inline-flex;
+}
+
+/* ---------------------------------------------------------------------------
+   Chapter heading (c96d752d0 yZ): the pinned reply's title, first among its items,
+   text-body-semibold at the chat size, 56px of scroll margin; double-click renames it. */
+
+.chapter-heading {
+  margin: 0;
+  scroll-margin-top: 56px;
+  color: var(--cds-text-primary);
+  font-size: var(--chat-body);
+  line-height: var(--chat-leading);
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+  user-select: text;
+}
+
+.chapter-input {
+  min-width: 10ch;
+  max-width: 40ch;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  outline: 1.5px solid var(--cds-fill-accent);
+  outline-offset: 1px;
+  box-shadow: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  field-sizing: content;
+}
+
+/* ---------------------------------------------------------------------------
+   The assistant's rows (CDS AssistantMessage, [data-text-size] so m reads 14/20): text 4px in
+   with a stop of up to 56px on wide rows, items --chat-item-gap apart; the action row sits
+   gap-xs under them, in flow (c80ec48f8 Be: the AssistantMessage root's gap-xs). */
+
+.reply-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+}
+
+.reply-row:has(> .agent-flow:empty) {
+  display: none;
+}
+
+.agent-flow {
+  --cds-assistant-message-text-inset: 4px;
+  --cds-assistant-message-text-stop: clamp(0px, (100% - 384px) * 0.175, 56px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--chat-item-gap);
+  min-width: 0;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.agent-message {
+  min-width: 0;
+}
+
+/* Prose (c6a992d55 .prose, size base, sans): blocks .75em apart; headings 3 / 2.5 / 2 /
+   1.667 flows above them and .667 below; lists and tables leave 2 flows after them. */
+.prose {
+  --_prose-flow: 0.75em;
+  font-family: var(--font-sans);
+  font-size: var(--cds-font-size-prose);
+  line-height: var(--cds-leading-prose);
+  font-weight: var(--cds-font-weight-regular);
+  font-variation-settings: var(--cds-font-wght-regular);
+  overflow-wrap: break-word;
+}
+
+.markdown {
+  --_prose-flow: 0.75em;
+  min-width: 0;
+}
+
+/* No more specific than the rules after it, as in c6a992d55's @scope(.prose): a heading's
+   .667 below wins over this by order, settled or streaming (.md-block). */
+.markdown :is(p, ul, ol, dl, blockquote, pre, figure, details),
+.markdown :where(.md-code, .md-table) {
+  margin-block: var(--_prose-flow) 0;
+}
+
+.markdown :is(p, dt, h1, h2, h3, h4, h5, h6) {
+  padding-inline-start: var(--cds-assistant-message-text-inset, 0px);
+}
+
+.markdown :is(li, blockquote, td, th, dd, details, figure) {
+  --cds-assistant-message-text-inset: 0px;
+}
+
+.markdown :is(p, h1, h2, h3, h4, h5, h6, ul, ol, dl) {
+  padding-inline-end: var(--cds-assistant-message-text-stop, 0px);
+}
+
+.markdown :is(li, dt, dd, td, th, details, figure) {
+  --cds-assistant-message-text-stop: 0px;
+}
+
+.markdown :is(h1, h2, h3, h4, h5, h6, strong, b, dt, summary) {
+  font-weight: var(--cds-font-weight-bold);
+  font-variation-settings: var(--cds-font-wght-bold);
+}
+
+.markdown :is(h1, h2, h3, h4, h5, h6) {
+  margin-block: calc(var(--_prose-flow) * var(--_prose-h-space)) 0;
+}
+
+.markdown h1 {
+  --_prose-h-space: 3;
+  font-size: 1.75em;
+  line-height: 1.25;
+}
+
+.markdown h2 {
+  --_prose-h-space: 2.5;
+  font-size: 1.375em;
+  line-height: 1.25;
+}
+
+.markdown h3 {
+  --_prose-h-space: 2;
+  font-size: 1.125em;
+  line-height: 1.3;
+}
+
+.markdown h4 {
+  --_prose-h-space: 1.667;
+  font-size: 1em;
+  line-height: 1.3;
+}
+
+.markdown :is(h5, h6) {
+  --_prose-h-space: 1.667;
+  font-size: 0.875em;
+  line-height: 1.3;
+}
+
+.markdown h6 {
+  color: var(--cds-text-secondary);
+}
+
+.markdown :is(h1, h2, h3, h4, h5, h6) + * {
+  margin-block-start: calc(var(--_prose-flow) * 0.667);
+}
+
+.markdown :is(ul, ol, dl, .md-table, hr) + * {
+  margin-block-start: calc(var(--_prose-flow) * 2);
+}
+
+.markdown :is(ul, ol, dl, .md-table, hr) + :is(h1, h2, h3, h4, h5, h6) {
+  margin-block-start: calc(var(--_prose-flow) * max(2, var(--_prose-h-space)));
+}
+
+/* The first block at every level sits flush (the streaming wrappers are handled below). */
+.markdown :first-child:not(summary, .md-block, .md-block > *) {
+  margin-block-start: 0;
+}
+
+.markdown > .md-block:first-child > :first-child {
+  margin-block-start: 0;
+}
+
+/* While streaming each top-level block has its own .md-block, so the rules that read the
+   previous block (after a heading, a list, a table) are repeated across the wrappers. */
+.markdown > .md-block:has(> :is(h1, h2, h3, h4, h5, h6)) + .md-block > :first-child {
+  margin-block-start: calc(var(--_prose-flow) * 0.667);
+}
+
+.markdown > .md-block:has(> :is(ul, ol, dl, .md-table, hr)) + .md-block > :first-child:not(h1, h2, h3, h4, h5, h6) {
+  margin-block-start: calc(var(--_prose-flow) * 2);
+}
+
+.markdown :is(ul, ol) {
+  padding-inline-start: 2em;
+}
+
+.markdown ul {
+  list-style-type: disc;
+}
+
+.markdown ol {
+  list-style-type: decimal;
+}
+
+.markdown ul > li > ul {
+  list-style-type: circle;
+}
+
+.markdown ul > li > ul > li > ul {
+  list-style-type: square;
+}
+
+.markdown ol > li > ol {
+  list-style-type: lower-alpha;
+}
+
+.markdown ol > li > ol > li > ol {
+  list-style-type: lower-roman;
+}
+
+.markdown li {
+  margin-block: calc(var(--_prose-flow) * 0.333) 0;
+  padding-inline-start: 0.5em;
+}
+
+.markdown li > :is(p, ul, ol, dl, blockquote, pre, figure, details, .md-code, .md-table) {
+  margin-block-start: calc(var(--_prose-flow) * 0.333);
+}
+
+.markdown li::marker {
+  color: var(--cds-text-secondary);
+}
+
+/* Task items (c19e90103 Hy / Uy): a check in a 16px box or a 12px ring; done items strike
+   through in muted ink. */
+.markdown li.md-task {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  text-decoration-thickness: 1px;
+}
+
+.markdown li.md-task[data-done] {
+  color: var(--cds-text-muted);
+  text-decoration-line: line-through;
+}
+
+.md-task-mark {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 1px;
+  color: var(--cds-text-primary);
+}
+
+.md-task-mark [data-cds="Icon"] {
+  font-size: 16px;
+  font-weight: 533.3;
+}
+
+.md-task-ring {
+  display: block;
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 1px solid var(--cds-alpha-3);
+  border-radius: 50%;
+}
+
+.markdown dd {
+  margin-block-start: calc(var(--_prose-flow) * 0.333);
+  margin-inline-start: 2em;
+}
+
+.markdown blockquote {
+  margin-inline: 0.5em 0;
+  padding-inline-start: 1em;
+  border-inline-start: 4px solid var(--cds-border);
+  color: var(--cds-text-secondary);
+}
+
+/* Links, and file paths in inline code as prose links (c19e90103 Zh). */
+.markdown :is(a, .prose-link) {
+  border-radius: 2px;
+  color: var(--cds-text-accent);
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in srgb, currentColor, transparent 60%);
+  text-underline-offset: 3px;
+  transition:
+    color var(--cds-dur-fast) var(--cds-ease-out),
+    text-decoration-color var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+.markdown .prose-link {
+  border-radius: 3px;
+  cursor: pointer;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.markdown :is(a, .prose-link):is(:hover, :focus-visible) {
+  text-decoration-color: currentColor;
+}
+
+.markdown .prose-link:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+/* `@path` in your message (cb6930dae Bs → c86240138 t): accent ink, underlined only on hover. */
+.mention-text .prose-link {
+  border-radius: 3px;
+  color: var(--cds-text-accent);
+  cursor: pointer;
+  text-underline-offset: 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.mention-text .prose-link:hover {
+  text-decoration-line: underline;
+}
+
+.mention-text .prose-link:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.markdown :is(em, i) {
+  font-style: italic;
+}
+
+.markdown :is(del, s) {
+  text-decoration-line: line-through;
+  text-decoration-color: color-mix(in oklab, currentColor 60%, transparent);
+}
+
+.markdown mark {
+  padding-inline: 0.125em;
+  border-radius: 2px;
+  background: #fab21954;
+  color: inherit;
+}
+
+.markdown :is(sup, sub) {
+  font-size: 0.75em;
+  line-height: 0;
+}
+
+.markdown kbd {
+  padding: 0.0625em 0.375em;
+  border: 1px solid var(--cds-border);
+  border-bottom-width: 2px;
+  border-radius: var(--cds-radius);
+  background: var(--cds-alpha-1);
+  font-family: var(--font-mono);
+  font-size: 0.8125em;
+}
+
+/* Inline code: danger ink on a 5% chip with a hairline. The reply is prose: c96d752d0 U5e hands
+   c19e90103 Ix `typography: "prose"`, whose Lx renders the shared-10 Prose root, so this is the
+   c6a992d55 @scope(.prose) `code:not(pre code)` rule (only callouts set its
+   --cds-prose-code-color). --code-chip-ink recolours it, as epitaxy-markdown's chips take it. */
+.markdown :not(pre) > code {
+  padding: 0.0625em 0.25em;
+  border: 0.5px solid var(--cds-border);
+  border-radius: 0.4em;
+  background: var(--cds-alpha-1);
+  color: var(--code-chip-ink, var(--cds-text-danger));
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  line-height: 1;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.markdown hr {
+  margin-block: calc(var(--_prose-flow) * 2) 0;
+  margin-inline: 0.375em;
+  border: 0;
+  border-block-start: 0.5px solid var(--cds-border);
+}
+
+/* c19e90103 Qy: block, 5px corners, a 1px border. */
+.markdown img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--cds-border);
+  border-radius: 5px;
+  cursor: zoom-in;
+}
+
+/* c19e90103 eb: while a local image loads (content.tsx md-image), a 120px bar at most 320px wide. */
+.md-image-wait {
+  max-width: 320px;
+}
+
+.md-image-wait > .skeleton-line {
+  width: 100%;
+  height: 120px;
+  border-radius: 0.375rem;
+}
+
+.md-table {
+  overflow-x: auto;
+}
+
+.markdown table {
+  width: 100%;
+  border: 1px solid var(--cds-border);
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: var(--cds-radius);
+  font: inherit;
+  text-align: start;
+}
+
+.markdown :is(th, td) {
+  padding: 0.4375em 0.75em;
+  vertical-align: top;
+}
+
+.markdown th {
+  background: var(--cds-alpha-1);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  text-align: start;
+}
+
+.markdown thead > tr > :is(th, td) {
+  border-block-end: 1px solid var(--cds-border);
+}
+
+.markdown tbody > tr + tr > :is(th, td) {
+  border-block-start: 1px solid var(--cds-border);
+}
+
+.markdown thead > tr:first-child > th:first-child {
+  border-start-start-radius: calc(var(--cds-radius) - 1px);
+}
+
+.markdown thead > tr:first-child > th:last-child {
+  border-start-end-radius: calc(var(--cds-radius) - 1px);
+}
+
+.markdown th :is(code, kbd) {
+  background: none;
+}
+
+/* Epitaxy markdown (c19e90103 .epitaxy-markdown: cb6930dae Lu's task steps, in the row's ink):
+   no prose flow, the blocks a column --chat-item-gap apart in the chat body; strong medium (its
+   dark axis stays); lists pad-sm apart and 20px in, disc or decimal at every level, markers in
+   the row's ink; the code chip in --code-chip-ink (primary) at the body less 1px, no hairline.
+   Headings, quotes, rules, tables and kbd follow the same sheet (the files pane's pane prose
+   shows them). ponytail: task lists and code inside a link keep the prose look; port them from
+   the same sheet once a surface shows them. */
+.markdown.epitaxy {
+  --_prose-flow: 0px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--chat-item-gap, 10px);
+  font-size: var(--chat-body, var(--cds-font-size-body));
+  line-height: var(--chat-leading, var(--cds-leading-body));
+  overflow-wrap: break-word;
+}
+
+.markdown.epitaxy strong {
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.markdown.epitaxy :is(ul, ol) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-pad-sm);
+  padding-inline-start: 20px;
+}
+
+.markdown.epitaxy ul {
+  list-style-type: disc;
+}
+
+.markdown.epitaxy ol {
+  list-style-type: decimal;
+}
+
+.markdown.epitaxy li {
+  padding-inline-start: 0;
+}
+
+.markdown.epitaxy li::marker {
+  color: inherit;
+}
+
+.markdown.epitaxy :is(li, td, th) > :not([data-wf=""]) ~ :is(p, ul, ol, blockquote) {
+  margin-block-start: var(--cds-pad-sm);
+}
+
+.markdown.epitaxy :not(pre) > code {
+  padding: 1px 2px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--code-chip-ink, var(--cds-text-primary));
+  font-size: calc(var(--chat-body, var(--cds-font-size-body)) - 1px);
+  line-height: 1.4;
+  white-space: inherit;
+}
+
+.markdown.epitaxy h1 {
+  margin-block: 12px -4px;
+  color: var(--cds-text-primary);
+  font-size: 1.14286em;
+  line-height: 1.25;
+}
+
+.markdown.epitaxy h2 {
+  margin-block: 10px -4px;
+  color: var(--cds-text-primary);
+  font-size: 1.07143em;
+  line-height: 1.33333;
+}
+
+.markdown.epitaxy h3 {
+  margin-block: 7px -4px;
+  font-size: 1em;
+  line-height: inherit;
+}
+
+.markdown.epitaxy :is(h1, h2, h3) {
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+  letter-spacing: -0.01em;
+}
+
+.markdown.epitaxy :is(h1, h2, h3):first-child {
+  margin-block-start: 0;
+}
+
+.markdown.epitaxy :is(h4, h5, h6) {
+  margin-block: 0;
+  color: inherit;
+  font-size: 1em;
+  line-height: inherit;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.markdown.epitaxy kbd {
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: calc(var(--chat-body, var(--cds-font-size-body)) - 2px);
+  line-height: 1;
+}
+
+.markdown.epitaxy blockquote {
+  display: flex;
+  flex-direction: column;
+  gap: var(--chat-item-gap, 10px);
+  margin-inline: 0;
+  padding-inline-start: var(--cds-pad-md);
+  border-inline-start: 2px solid var(--cds-alpha-2);
+}
+
+.markdown.epitaxy hr {
+  margin-block: var(--chat-item-gap, 10px);
+  margin-inline: 0;
+  border-block-start-color: var(--cds-alpha-3);
+}
+
+.markdown.epitaxy table {
+  border: 0;
+  border-spacing: 2px;
+  border-radius: 0;
+}
+
+.markdown.epitaxy thead:not(:has(th:not(:empty))) {
+  display: none;
+}
+
+.markdown.epitaxy :is(th, td) {
+  padding: var(--cds-pad-sm);
+  border: 0;
+  border-radius: 3px;
+  text-align: start;
+  overflow-wrap: break-word;
+}
+
+.markdown.epitaxy th,
+.markdown.epitaxy thead > tr:first-child > th:is(:first-child, :last-child) {
+  border-radius: 3px;
+  background: var(--cds-alpha-2);
+}
+
+.markdown.epitaxy td {
+  background: var(--cds-alpha-1);
+}
+
+.markdown.epitaxy table :not(pre) > code {
+  background: none;
+}
+
+/* Streamed words fade in (c19e90103 _wordAnimating: _fadeInText 200ms linear backwards, each word
+   delayed by the reveal ledger); none with reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduce-motion="true"]) .fade-word {
+    animation: fadeInText 200ms linear backwards;
+  }
+}
+
+/* In phrase mode (设置 → 通用 → 外观 → 按短语淡入回复, __gb__2846116625) each new stretch of text
+   ramps in whole over 400ms (shared-10 pm: a linear opacity animation as it mounts). */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduce-motion="true"]) .fade-phrase {
+    animation: fadeInText 400ms linear backwards;
+  }
+}
+
+/* A busy turn's reply rises once (c6a992d55 .message-fade-up: 10px on the 1.1s spring). */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduce-motion="true"]) .message-fade-up {
+    animation: 1.1s cubic-bezier(0.34, 1.56, 0.64, 1) message-fade-up;
+    animation-timing-function: var(--cds-message-spring);
+  }
+}
+
+/* Optical hanging punctuation (CDS [data-hang-face], c4a9ee384): an opening quote hangs into the
+   margin by its measured width. Lists and tables do not hang. The Code tab's reply is set in the
+   interface font and hangs by that face's metrics (c96d752d0 uI() "sans", z5e: Anthropic Sans →
+   sans, OpenDyslexic → dyslexia, System → none off macOS). */
+[data-hang-face] {
+  --reply-hang-room: 12px;
+  --hq-dq: 0.397em;
+  --hq-dq-b: 0.455em;
+  --hq-sq: 0.232em;
+  --hq-sq-b: 0.2585em;
+  --hq-h1: 0.958;
+  --hq-h2: 0.98;
+  --hq-h3: 0.994;
+}
+
+:root[data-dyslexic-font] [data-hang-face] {
+  --hq-dq: 0.573em;
+  --hq-dq-b: 0.586em;
+  --hq-sq: 0.302em;
+  --hq-sq-b: 0.352em;
+  --hq-h1: 1;
+  --hq-h2: 1;
+  --hq-h3: 1;
+}
+
+/* System: no hang off macOS, the system face's metrics on it ([data-hang-face=system]). */
+:root[data-system-font]:not([data-system-hang]) [data-hang-face] {
+  --hq-dq: 0px;
+  --hq-dq-b: 0px;
+  --hq-sq: 0px;
+  --hq-sq-b: 0px;
+}
+
+:root[data-system-hang] [data-hang-face] {
+  --hq-dq: 0.4349em;
+  --hq-dq-b: 0.4947em;
+  --hq-sq: 0.2769em;
+  --hq-sq-b: 0.3077em;
+  --hq-h1: 0.852;
+  --hq-h2: 0.912;
+  --hq-h3: 0.97;
+}
+
+[data-hang-face] blockquote {
+  --reply-hang-room: 8px;
+}
+
+[data-hang-face] :is(li, td, th) {
+  --reply-hang-room: 0px;
+}
+
+[data-hang-face] :is(h1, h2, h3) {
+  --hq-dq: var(--hq-dq-b);
+  --hq-sq: var(--hq-sq-b);
+}
+
+[data-hang-face] h1 {
+  --hq-level: var(--hq-h1);
+}
+
+[data-hang-face] h2 {
+  --hq-level: var(--hq-h2);
+}
+
+[data-hang-face] h3 {
+  --hq-level: var(--hq-h3);
+}
+
+span[data-hang-quote] {
+  --hq-1: 0px;
+  --hq-hang: clamp(0px, var(--hq-1) * var(--hq-level, 1), var(--reply-hang-room, 0px));
+  margin-inline-start: calc(-1 * var(--hq-hang));
+}
+
+span[data-hang-quote="dq"] {
+  --hq-1: var(--hq-dq, 0px);
+}
+
+span[data-hang-quote="sq"] {
+  --hq-1: var(--hq-sq, 0px);
+}
+
+/* ---------------------------------------------------------------------------
+   Code fence (c19e90103 .epitaxy-codeblock / .epitaxy-fence): as wide as its code (318px at
+   least), the code surface with a 1px inner border, rounded-lg, code 12/17 mono 8 / 10px + 1ch
+   in, no header and no line numbers; the icon-only copy key sticks 7px from the right, level
+   with a lone line, and hides while the block is still streaming. Colors and surface: the code
+   theme of the page's mode (Settings → 代码外观, lib/themes.ts; Claude Light / Dark by default),
+   which Settings.tsx writes on <html> as --code-light-* / --code-dark-*; a [data-code-mode]
+   subtree (the settings previews) takes that mode's whatever the page's. */
+
+:root,
+[data-code-mode="light"] {
+  --code-bg: var(--code-light-bg);
+  --code-fg: var(--code-light-fg);
+  --code-comment: var(--code-light-comment);
+  --code-comment-style: var(--code-light-comment-style);
+  --code-string: var(--code-light-string);
+  --code-number: var(--code-light-number);
+  --code-keyword: var(--code-light-keyword);
+  --code-function: var(--code-light-function);
+  --code-type: var(--code-light-type);
+  --code-tag: var(--code-light-tag);
+  --code-attr: var(--code-light-attr);
+  --code-variable: var(--code-light-variable);
+  --code-property: var(--code-light-property);
+  --code-punctuation: var(--code-light-punctuation);
+  --code-regexp: var(--code-light-regexp);
+  --code-inserted: var(--code-light-inserted);
+  --code-deleted: var(--code-light-deleted);
+}
+
+.dark,
+[data-code-mode="dark"] {
+  --code-bg: var(--code-dark-bg);
+  --code-fg: var(--code-dark-fg);
+  --code-comment: var(--code-dark-comment);
+  --code-comment-style: var(--code-dark-comment-style);
+  --code-string: var(--code-dark-string);
+  --code-number: var(--code-dark-number);
+  --code-keyword: var(--code-dark-keyword);
+  --code-function: var(--code-dark-function);
+  --code-type: var(--code-dark-type);
+  --code-tag: var(--code-dark-tag);
+  --code-attr: var(--code-dark-attr);
+  --code-variable: var(--code-dark-variable);
+  --code-property: var(--code-dark-property);
+  --code-punctuation: var(--code-dark-punctuation);
+  --code-regexp: var(--code-dark-regexp);
+  --code-inserted: var(--code-dark-inserted);
+  --code-deleted: var(--code-dark-deleted);
+}
+
+.md-code {
+  position: relative;
+  display: grid;
+  width: fit-content;
+  min-width: min(100%, 318px);
+  max-width: 100%;
+  overflow: clip;
+  border-radius: 8px;
+  background: var(--code-bg);
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  color: var(--code-fg);
+}
+
+/* Room on the right for one key: h-control + 3 x pad-xs + 2px (c19e90103 dg(1)), then 1ch. */
+.md-code pre {
+  grid-area: 1 / 1;
+  margin: 0;
+  padding: var(--cds-pad-md) calc(var(--cds-h-control) + var(--cds-pad-xs) * 3 + 2px + 1ch) var(--cds-pad-md) calc(10px + 1ch);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--cds-font-size-code);
+  line-height: var(--cds-leading-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 2;
+}
+
+/* c19e90103 Bg: 5px under the scroller's top, or under the transcript's top strip. */
+.md-copy {
+  position: sticky;
+  top: calc(var(--epitaxy-top-fade-height, 0px) + 5px);
+  grid-area: 1 / 1;
+  align-self: start;
+  justify-self: end;
+  display: grid;
+  place-items: center;
+  width: var(--cds-h-control);
+  height: var(--cds-h-control);
+  margin: 5px 7px 0 0;
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-muted);
+  transition:
+    color var(--cds-dur-fast) ease-out,
+    background-color var(--cds-dur-fast) ease-out;
+}
+
+/* c19e90103 n_: 在终端中运行 left of the copy key, 3px apart (gap-0.75), only where a terminal can
+   start; the code makes room for the second key (dg(2)). */
+.md-run {
+  display: none;
+}
+
+[data-can-run] .md-code[data-runnable] pre {
+  padding-right: calc(var(--cds-h-control) * 2 + var(--cds-pad-xs) * 3 + 5px + 1ch);
+}
+
+[data-can-run] .md-run {
+  position: sticky;
+  top: calc(var(--epitaxy-top-fade-height, 0px) + 5px);
+  grid-area: 1 / 1;
+  align-self: start;
+  justify-self: end;
+  display: grid;
+  place-items: center;
+  width: var(--cds-h-control);
+  height: var(--cds-h-control);
+  margin: 5px calc(7px + var(--cds-h-control) + 3px) 0 0;
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-muted);
+  transition:
+    color var(--cds-dur-fast) ease-out,
+    background-color var(--cds-dur-fast) ease-out;
+}
+
+[data-can-run] .md-code[data-single] .md-run {
+  margin-top: calc(var(--cds-pad-md) + var(--cds-leading-code) / 2 - var(--cds-h-control) / 2);
+}
+
+.markdown[data-streaming] > .md-block:last-child .md-run {
+  display: none;
+}
+
+.md-run:hover {
+  background: var(--cds-fill-ghost-hover);
+  color: var(--cds-text-primary);
+}
+
+.md-run [data-cds="Icon"] {
+  font-size: var(--cds-icon);
+  font-weight: var(--cds-icon-wght);
+  pointer-events: none;
+}
+
+.md-code[data-single] .md-copy {
+  margin-top: calc(var(--cds-pad-md) + var(--cds-leading-code) / 2 - var(--cds-h-control) / 2);
+}
+
+.markdown[data-streaming] > .md-block:last-child .md-copy {
+  display: none;
+}
+
+.md-copy:hover {
+  background: var(--cds-fill-ghost-hover);
+  color: var(--cds-text-primary);
+}
+
+.md-copy [data-cds="Icon"] {
+  font-size: var(--cds-icon);
+  font-weight: var(--cds-icon-wght);
+  pointer-events: none;
+}
+
+.md-copy .md-check-icon,
+.md-copy[data-copied] .md-copy-icon {
+  display: none;
+}
+
+.md-copy[data-copied] .md-check-icon {
+  display: flex;
+}
+
+/* highlight.js classes on the theme's scopes (lib/themes.ts): comment, string, constant, keyword,
+   function, type, tag, attribute, variable, property, punctuation, regexp, inserted, deleted
+   (diffs reuse them). */
+.hljs-comment,
+.hljs-quote {
+  color: var(--code-comment);
+  font-style: var(--code-comment-style);
+}
+
+.hljs-string,
+.hljs-template-tag {
+  color: var(--code-string);
+}
+
+.hljs-number,
+.hljs-literal,
+.hljs-symbol,
+.hljs-bullet {
+  color: var(--code-number);
+}
+
+.hljs-keyword,
+.hljs-doctag {
+  color: var(--code-keyword);
+}
+
+.hljs-title.function_,
+.hljs-built_in,
+.hljs-section {
+  color: var(--code-function);
+}
+
+.hljs-section {
+  font-weight: 600;
+  font-variation-settings: var(--cds-font-wght-bold);
+}
+
+.hljs-title,
+.hljs-title.class_,
+.hljs-type {
+  color: var(--code-type);
+}
+
+.hljs-name,
+.hljs-selector-tag {
+  color: var(--code-tag);
+}
+
+.hljs-attr,
+.hljs-attribute,
+.hljs-selector-class,
+.hljs-selector-id {
+  color: var(--code-attr);
+}
+
+.hljs-variable,
+.hljs-template-variable,
+.hljs-params {
+  color: var(--code-variable);
+}
+
+.hljs-property {
+  color: var(--code-property);
+}
+
+.hljs-punctuation,
+.hljs-operator,
+.hljs-meta {
+  color: var(--code-punctuation);
+}
+
+.hljs-regexp,
+.hljs-char.escape_ {
+  color: var(--code-regexp);
+}
+
+.hljs-addition {
+  color: var(--code-inserted);
+}
+
+.hljs-deletion {
+  color: var(--code-deleted);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: 600;
+  font-variation-settings: var(--cds-font-wght-bold);
+}
+
+/* ---------------------------------------------------------------------------
+   Thinking (default design, c96d752d0 UZ / G1): the lines as plain text 3px apart, text-body
+   italic muted, with h-control + pad-xs kept clear for the 复制为引用 key. */
+
+.thinking {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-inline-end: calc(var(--cds-h-control) + var(--cds-pad-xs));
+  color: var(--cds-text-muted);
+  font-style: italic;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* Thoughts in a row read as one list, as the thinking before a call does (c06cf64bb
+   precedingThinking). ponytail: also before text, where Claude keeps --chat-item-gap between
+   them; tell the two apart by what follows if that ever shows. */
+.thinking + .thinking {
+  margin-top: calc(3px - var(--chat-item-gap));
+}
+
+.thinking-copy {
+  position: absolute;
+  inset-inline-end: 0;
+  top: 0;
+  font-style: normal;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--cds-dur-fast) var(--cds-ease-snap);
+}
+
+.thinking:hover .thinking-copy,
+.thinking:focus-within .thinking-copy {
+  opacity: 1;
+  pointer-events: auto;
+  transition-duration: var(--cds-dur-snap);
+  transition-delay: 100ms;
+}
+
+/* ---------------------------------------------------------------------------
+   Tool rows (c425fb3cf, JIe default design; spaced as the user's Claude draws them, the
+   c734f318c TurnStatusStep): an inline line of verb · detail · outcome · caret, gap-xs apart,
+   text-body. Settled, the verb is muted (secondary on hover); running or waiting on approval it
+   is secondary (primary on hover) and shimmers in secondary; failed, it reads as done and says
+   失败 after the detail in danger (c734f318c St, the user's rows design). A command summary
+   or file name is primary; a plain detail runs into the verb's label (c96d752d0 JIe C). */
+
+.tool-row {
+  --cds-assistant-message-text-inset: 0px;
+  --cds-assistant-message-text-stop: 0px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-inline-start: 4px;
+}
+
+/* The whole line toggles; the label is its keyboard button, so file links in a file name's
+   detail and keys among the badges never sit inside a button. */
+.tool-line {
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+  max-width: 100%;
+  color: var(--cds-text-muted);
+  transition: color var(--cds-dur-fast) ease-out;
+}
+
+.tool-line[data-toggles] {
+  cursor: pointer;
+}
+
+.tool-line[data-toggles]:hover {
+  color: var(--cds-text-secondary);
+}
+
+.tool-row:is([data-status="running"], [data-pending]) > .tool-line {
+  color: var(--cds-text-secondary);
+}
+
+.tool-row:is([data-status="running"], [data-pending]) > .tool-line[data-toggles]:hover {
+  color: var(--cds-text-primary);
+}
+
+.tool-head {
+  display: flex;
+  align-items: center;
+  flex: none;
+  padding: 0;
+  border-radius: 4px;
+  color: inherit;
+  text-align: start;
+  cursor: inherit;
+}
+
+.tool-head:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+/* With no meta beside it the label is what shrinks: a plain detail run into it truncates with
+   the verb (c734f318c St: min-w-0, shrink-0 only beside a meta). */
+.tool-head[data-joined] {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.tool-head[data-joined] .tool-verb {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: clip;
+  text-overflow: ellipsis;
+}
+
+.tool-verb {
+  flex: none;
+  white-space: nowrap;
+}
+
+.tool-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-detail[data-kind="code"] {
+  color: var(--cds-text-primary);
+}
+
+/* Claude runs the hook note into the label too, so it keeps 3px; a file name or command is the
+   step's own meta, gap-xs on (c734f318c St). */
+.tool-note {
+  margin-inline-start: calc(3px - var(--cds-gap-xs));
+}
+
+.tool-model {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* BOe / FOe heartbeat: a running sub-agent's latest tool, cut at 24ch, then its call count. */
+.tool-heartbeat {
+  min-width: 0;
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-note {
+  flex: none;
+  color: var(--cds-text-muted);
+  white-space: nowrap;
+}
+
+/* 已拒绝 / 已停止 / 已屏蔽, a failed call's 失败, and 需要批准 in the detail's place (JIe
+   26204–26273; tones as shared-frame Vj). */
+.tool-outcome {
+  flex: none;
+  color: var(--cds-text-secondary);
+  white-space: nowrap;
+}
+
+.tool-outcome[data-tone="warning"] {
+  color: var(--cds-text-warning);
+}
+
+.tool-outcome[data-tone="danger"] {
+  color: var(--cds-text-danger);
+}
+
+.tool-caret {
+  flex: none;
+  color: var(--cds-text-muted);
+  transition:
+    rotate var(--cds-dur-fast) ease-out,
+    color var(--cds-dur-fast) ease-out;
+}
+
+.tool-line[data-toggles]:hover .tool-caret,
+.tool-line[data-open] > .tool-caret,
+[aria-expanded="true"] > .tool-caret {
+  color: var(--cds-text-secondary);
+}
+
+.tool-line[data-open] > .tool-caret:not([data-still]),
+[aria-expanded="true"] > .tool-caret {
+  rotate: 90deg;
+}
+
+/* The caret's button sits -ms-1 into the row's gap (c734f318c tt / nt). */
+:is(.tool-line, .tool-group-line) > .tool-caret {
+  margin-inline-start: -4px;
+}
+
+/* shared-9 _C rowUnclipped: a row with nothing to open whose label was cut off shows it whole,
+   wrapping (whitespace-normal break-words, block text-secondary). */
+.tool-row[data-unclipped] > .tool-line {
+  flex-wrap: wrap;
+  color: var(--cds-text-secondary);
+}
+
+.tool-row[data-unclipped] :is(.tool-head, .tool-verb, .tool-detail, .tool-live) {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* c4de0b325 B2: what follows the outcome outside the toggle, gap-xs on. */
+.tool-trail {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  cursor: default;
+}
+
+/* c63275c0a bh: 查看实时输出 (text-body text-primary, underlined on hover). */
+.tool-live-output {
+  flex: none;
+  padding: 0;
+  border-radius: 3px;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  text-underline-offset: 3px;
+}
+
+.tool-live-output:hover {
+  text-decoration: underline;
+}
+
+.tool-live-output:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.tool-badges {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: var(--cds-gap-xs);
+  margin-inline-start: var(--cds-gap-xs);
+  cursor: default;
+}
+
+/* c96d752d0 Vz: +N −N in the git colors at body size, 2px apart. */
+.diff-stat {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* c227f4d5e bC (np) at [data-size=xs], compact: what a status row trails in Claude's rows
+   design, the row's gap-xs after its text — +N and −N on their git tints, 4px in, 1px after the
+   sign, 10px medium figures in a 16px pill rounded a quarter of its height. In from 3px below
+   once it settles (q_e, cds-morph-in .18s). */
+.diff-pill {
+  display: inline-flex;
+  flex: none;
+  height: 16px;
+  overflow: hidden;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.25;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.diff-pill > :is(.plus, .minus) {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding-inline: 4px;
+}
+
+.diff-pill > .plus {
+  background: var(--cds-bg-git-added);
+}
+
+.diff-pill > .minus {
+  background: var(--cds-bg-git-removed);
+}
+
+.diff-pill[data-enter] {
+  animation: cds-morph-in 0.18s cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* c96d752d0 v2e, the default design: adjacent tool rows fold into one button line (c425fb3cf le,
+   the rows' 4px in; gap-xs as Claude's TurnStatus) whose label is muted, secondary on hover or
+   open, and secondary (primary on hover) while a call runs or waits — the running call as one
+   label under the secondary shimmer; the parts truncate, 及其他 N 项操作 does not. Open, an
+   outlined card uses TurnStatusStep's card spacing (c734f318c kt / Ge): pt-sm, pb-xs,
+   rounded-card, px-md and py-sm per cell, with a hairline between them. */
+.tool-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tool-group-line {
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+  max-width: 100%;
+  margin-inline-start: 4px;
+  padding: 0;
+  border-radius: 4px;
+  color: var(--cds-text-muted);
+  text-align: start;
+  transition: color var(--cds-dur-fast) ease-out;
+}
+
+.tool-group-line:is(:hover, [aria-expanded="true"]),
+.tool-group[data-busy] > .tool-group-line {
+  color: var(--cds-text-secondary);
+}
+
+.tool-group[data-busy] > .tool-group-line:hover {
+  color: var(--cds-text-primary);
+}
+
+/* A row holding the turn's mark is a busy TurnStatus: muted around its shimmering label (the
+   clock, the caret), secondary on hover or open. */
+.tool-row[data-marked] > .tool-line,
+.tool-group[data-marked] > .tool-group-line {
+  color: var(--cds-text-muted);
+}
+
+.tool-row[data-marked] > .tool-line:is([data-toggles]:hover, [data-open]),
+.tool-group[data-marked] > .tool-group-line:is(:hover, [aria-expanded="true"]) {
+  color: var(--cds-text-secondary);
+}
+
+.tool-group-line:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.tool-group-line > .tool-caret {
+  color: inherit;
+}
+
+/* Claude's rows design, the Code tab's today: a status line is h-control tall (c734f318c
+   Yj), rows sit 16px apart (c80ec48f8 Cr, compact mt-4) and a status line is pulled pad-xs
+   into each gap (c4a9ee384 -my-pad-xs), so 12px part it from the text around it. Opening the
+   reply under your message it keeps just the pull: mt-xs less pad-xs under the hover row. */
+.agent-flow > :is(.tool-group, .tool-row) {
+  margin-block: calc(1rem - var(--cds-pad-xs) - var(--chat-item-gap));
+}
+
+.turn-prompt + .reply-row > .agent-flow > :is(.tool-group, .tool-row):first-child {
+  margin-top: calc(-1 * var(--cds-pad-xs));
+}
+
+.tool-group-line,
+.agent-flow > .tool-row > .tool-line {
+  padding-block: calc((var(--cds-h-control) - 1lh) / 2);
+}
+
+.tool-group-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+}
+
+/* A running "verb detail", on a group's line or a row with a plain detail, truncates as one
+   label (c734f318c Gj). */
+.tool-live {
+  min-width: 0;
+  overflow-x: clip;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* cb6930dae Ta / Ea / Oa: the labels share one grid cell, the new one in from 3px below and
+   the old one out 3px up; while the width glides they keep their own width and the slot clips. */
+.morph {
+  display: inline-grid;
+  align-items: center;
+  justify-items: start;
+  min-width: 0;
+}
+
+.morph[data-gliding] {
+  overflow-x: clip;
+}
+
+.morph > * {
+  grid-area: 1 / 1;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.morph[data-gliding] > * {
+  max-width: none;
+}
+
+.morph > [data-enter] {
+  animation: cds-morph-in 0.18s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.morph > [data-exit] {
+  animation: cds-morph-out 0.18s cubic-bezier(0.2, 0, 0, 1) forwards;
+  pointer-events: none;
+}
+
+/* ZC / Jg: the one file a settled line names, in primary ink, underlined on hover. */
+.tool-group-file {
+  color: var(--cds-text-primary);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.tool-group-file:hover {
+  text-decoration: underline;
+}
+
+.tool-group-split {
+  display: flex;
+  min-width: 0;
+}
+
+.tool-group-names {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-group-rest {
+  flex: none;
+  white-space: pre;
+}
+
+.tool-group-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  margin-block: var(--cds-pad-sm) var(--cds-pad-xs);
+  overflow: clip;
+  border-radius: var(--cds-radius-card);
+}
+
+.tool-group-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  pointer-events: none;
+}
+
+/* Every row of the card is inset alike (c425fb3cf fe `[&>*]`), 已压缩会话 (jM) too. */
+.tool-group-card > :is(.tool-row, .compacted) {
+  padding: var(--cds-pad-sm) var(--cds-pad-md);
+}
+
+.tool-group-card > .tool-row > .tool-line {
+  align-self: stretch;
+}
+
+/* TurnStatusStep's card detail: pt-sm, then the remaining md-sm below the body. */
+.tool-group-card > .tool-row > .tool-body {
+  padding-block: var(--cds-pad-sm) calc(var(--cds-pad-md) - var(--cds-pad-sm));
+}
+
+.tool-group-card > .tool-row > .tool-body > :is(.tool-plain, .tool-notes) {
+  padding-top: 0;
+}
+
+.tool-group-card > :not(:last-child) {
+  border-bottom: 1px solid var(--cds-border);
+}
+
+/* The body mounts on first open and toggles with `hidden`, with no inset (c425fb3cf F / Q). */
+.tool-body {
+  position: relative;
+  display: flow-root;
+}
+
+.tool-notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
+  padding-top: var(--cds-pad-xs);
+  color: var(--cds-text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* c425fb3cf Q: plain content with the copy key at its end. */
+.tool-plain {
+  position: relative;
+  display: flex;
+  width: 100%;
+  padding-top: var(--cds-pad-xs);
+}
+
+.tool-plain[data-standalone] {
+  padding: var(--cds-pad-sm) var(--cds-pad-md);
+}
+
+.tool-plain-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--cds-text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.tool-output[data-failed] {
+  color: var(--cds-text-danger);
+}
+
+/* A 待办事项 row's body (cb6930dae yb's default look): the steps py-xs, gap-xs apart, in the body
+   text and primary ink, done ones secondary and struck through (pages.css .plan-todo). */
+.tool-plain-main > .plan-todos {
+  gap: var(--cds-gap-xs);
+  padding: var(--cds-pad-xs) 0;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  white-space: normal;
+}
+
+.question-option {
+  color: var(--cds-text-muted);
+}
+
+/* cb6930dae Au: `key: value`, keys in code at 70%. */
+.tool-args {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tool-arg {
+  overflow-wrap: break-word;
+}
+
+.tool-arg-key,
+.tool-arg-code {
+  font-family: var(--font-mono);
+  font-size: var(--cds-font-size-code);
+  line-height: var(--cds-leading-code);
+}
+
+.tool-arg-key {
+  opacity: 0.7;
+}
+
+.tool-arg-code {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* cb6930dae bc: a rename's 原名称 / 改为 rows (text-body, gap 0.75), a 48px label column; undone, 改为 struck through. */
+.rename-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.rename-row {
+  display: flex;
+  min-width: 0;
+  gap: var(--cds-gap-md);
+}
+
+.rename-label {
+  min-width: 48px;
+  flex-shrink: 0;
+  color: var(--cds-text-secondary);
+}
+
+.rename-value {
+  min-width: 0;
+  overflow-wrap: break-word;
+  color: var(--cds-text-primary);
+}
+
+.rename-value[data-undone] {
+  color: var(--cds-text-secondary);
+  text-decoration: line-through 1px;
+}
+
+.rename-undo {
+  align-items: center;
+  padding-top: 2px;
+}
+
+.rename-note {
+  min-width: 0;
+  overflow-wrap: break-word;
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  color: var(--cds-text-secondary);
+}
+
+/* c425fb3cf he: a body's copy key shows on hover of the body (or with focus). */
+.copy-key {
+  display: inline-flex;
+  flex: none;
+  opacity: 0;
+  transition: opacity var(--cds-dur-fast) var(--cds-ease-snap);
+}
+
+:is(.tool-plain, .tool-card, .diff-bare):hover .copy-key,
+.copy-key:focus-within,
+.copy-key[data-always] {
+  opacity: 1;
+}
+
+/* cb6930dae yu: the outlined card of a command (Cu), rounded-lg, py-md around it. */
+.tool-card {
+  padding-block: var(--cds-pad-md);
+}
+
+.tool-card-box {
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+}
+
+.tool-card-head {
+  display: flex;
+  align-items: center;
+  padding: var(--cds-pad-sm) var(--cds-pad-md);
+}
+
+.tool-card-title {
+  flex: 1;
+  color: var(--cds-text-secondary);
+}
+
+.tool-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-md);
+  padding: 0 var(--cds-pad-md) var(--cds-pad-lg);
+  font-family: var(--font-mono);
+  font-size: var(--cds-font-size-code);
+  line-height: var(--cds-leading-code);
+}
+
+/* In a group's card (Cu inCard, Q): the same content straight on the card. */
+.tool-card-main[data-bare] {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+}
+
+/* cb6930dae ga: the command on the code surface (claude themes outline it), `$` / `>` first. */
+.cmd-line {
+  display: flex;
+  align-items: flex-start;
+  overflow: clip;
+  padding: var(--cds-pad-xs) var(--cds-pad-md);
+  border-radius: 8px;
+  background: var(--code-bg);
+  box-shadow: 0 0 0 1px var(--cds-border);
+  color: var(--code-fg);
+}
+
+.cmd-prompt {
+  flex: none;
+  color: var(--cds-text-secondary);
+  white-space: pre;
+  user-select: none;
+}
+
+.cmd-code {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cmd-line > .copy-key {
+  align-items: center;
+  height: 1lh;
+}
+
+.cmd-output {
+  max-height: 400px;
+  margin: 0;
+  overflow-y: auto;
+  color: var(--cds-text-secondary);
+  font: inherit;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.cmd-output[data-failed] {
+  color: var(--cds-text-danger);
+}
+
+.cmd-output:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+/* cb6930dae Co: 运行中 (and the time past 10s), the copy key at the end. */
+/* cb6930dae cf: 已拒绝 / 已中断 under the output (font-sans text-body text-muted-as-secondary). */
+.cmd-outcome {
+  color: var(--muted-as-secondary, var(--cds-text-muted));
+  font-family: var(--font-sans);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.cmd-running {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: var(--cds-h-control);
+  color: var(--cds-text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.cmd-running-time {
+  font-variant-numeric: tabular-nums;
+}
+
+.cmd-running > .copy-key {
+  margin-inline-start: auto;
+}
+
+/* The user's own `!` command (c19e90103 Vg): the fence, then the output box 5px below. */
+.user-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-width: 100%;
+}
+
+.user-shell .md-code {
+  width: 100%;
+}
+
+.user-shell .md-code pre {
+  padding-inline-end: var(--cds-pad-lg);
+}
+
+.user-shell-output {
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 5px var(--cds-pad-md);
+  border-radius: 8px;
+  outline: 1px solid var(--cds-border);
+  outline-offset: -1px;
+}
+
+.user-shell-output pre {
+  margin: 0;
+  color: var(--cds-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--cds-font-size-code);
+  line-height: var(--cds-leading-code);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* cb6930dae vu: a file's diff on the code surface, its path over it. */
+.diff-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: clip;
+  border-radius: 8px;
+  background: var(--code-bg);
+}
+
+.diff-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  pointer-events: none;
+}
+
+.diff-card-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--cds-pad-sm) var(--cds-pad-md);
+}
+
+.diff-card .diff {
+  max-height: 400px;
+  background: none;
+}
+
+/* vu inCard: the path a pad-xs over a code surface that drops its outline. */
+.diff-bare {
+  display: flex;
+  flex-direction: column;
+  padding-top: var(--cds-pad-xs);
+}
+
+.diff-bare > .diff-card-head {
+  padding: 0 0 var(--cds-pad-xs);
+}
+
+.diff-bare > .diff-card::after {
+  content: none;
+}
+
+/* Command, MCP payloads and approval payloads share the fence surface. */
+.code-pre {
+  max-height: 320px;
+  margin: 0;
+  padding: var(--cds-pad-md) calc(10px + 1ch);
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--cds-surface-2);
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  color: var(--cds-text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--cds-font-size-code);
+  line-height: var(--cds-leading-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* U24: a file name opens the preview pane; underlined on hover, 3px down. */
+.file-link {
+  border-radius: 2px;
+  color: var(--cds-text-primary);
+  cursor: pointer;
+}
+
+.file-link:hover {
+  text-decoration-line: underline;
+  text-underline-offset: 3px;
+}
+
+.file-link:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.diff-card-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-cites {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* cb6930dae Hu: tool images under the line, 360px at most, 5px corners and a border. */
+.tool-images {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding-top: var(--cds-pad-md);
+}
+
+.tool-image-key {
+  max-width: 100%;
+  padding: 0;
+  border-radius: 5px;
+  cursor: zoom-in;
+}
+
+.tool-image-key:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.tool-image,
+.generated-image {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  max-height: 360px;
+  border: 1px solid var(--cds-border);
+  border-radius: 5px;
+}
+
+.image-gen {
+  display: grid;
+  justify-items: start;
+  gap: var(--cds-pad-xs);
+}
+
+.image-caption {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+/* c80ec48f8 He / c96d752d0 jM: 已压缩会话, one quiet line. */
+.compacted {
+  min-width: 0;
+  overflow: hidden;
+  padding-inline-start: 4px;
+  color: var(--cds-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* c4de0b325 p_e: a rewind's status line, its 撤销回退 / 重做回退 link at the end. */
+.rewind-marker {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+  min-height: var(--cds-h-control--xs);
+  padding-inline-start: 4px;
+  color: var(--cds-text-muted);
+}
+
+.rewind-marker-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rewind-marker-link {
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cds-text-secondary);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: var(--cds-cursor-interactive);
+}
+
+.rewind-marker-link:hover:not(:disabled) {
+  color: var(--cds-text-primary);
+}
+
+.rewind-marker-link:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.divider-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+}
+
+.divider-note::before,
+.divider-note::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--cds-border);
+}
+
+/* ---------------------------------------------------------------------------
+   Event rows (c96d752d0 tN / nN): 消息来自 〈agent〉, the subject in primary (underlined on
+   hover) and a caret; the body sits pad-md in. */
+
+.event-row {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-inline-start: 4px;
+}
+
+.event-head {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--cds-text-secondary);
+}
+
+.event-verb {
+  flex: none;
+  color: var(--cds-text-muted);
+  white-space: nowrap;
+  transition: color var(--cds-dur-fast) ease-out;
+}
+
+.event-verb:hover {
+  color: var(--cds-text-secondary);
+}
+
+.event-subject {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 2px;
+  color: var(--cds-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-subject:hover {
+  text-decoration-line: underline;
+  text-underline-offset: 3px;
+}
+
+.event-caret {
+  display: inline-grid;
+  margin: -3px;
+  padding: 3px;
+  color: var(--cds-text-muted);
+}
+
+.event-caret:hover {
+  color: var(--cds-text-secondary);
+}
+
+.event-caret .tool-caret {
+  transition: rotate var(--cds-dur-snap) var(--cds-ease-snap);
+}
+
+.event-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
+  padding: var(--cds-pad-xs) 0 0 var(--cds-pad-md);
+}
+
+/* c96d752d0 hN: the message in primary; past 1200 characters 16rem under a 3rem fade. */
+.report-text {
+  color: var(--cds-text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.report-text[data-folded] {
+  max-height: 16rem;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 3rem), transparent);
+  mask-image: linear-gradient(to bottom, black calc(100% - 3rem), transparent);
+}
+
+.report-fold.btn {
+  align-self: flex-start;
+}
+
+/* JIe 26166–26176 (c425fb3cf z): a running sub-agent you can open, 318px wide. */
+.agent-card {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: flex-start;
+  align-self: flex-start;
+  gap: var(--cds-gap-xs);
+  min-width: 318px;
+  max-width: 318px;
+  margin-inline-start: 4px;
+  padding: var(--cds-pad-sm) var(--cds-pad-xs) var(--cds-pad-sm) 10px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  color: var(--cds-text-primary);
+  text-align: start;
+}
+
+.agent-card:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.agent-card:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.agent-card-icon,
+.agent-card-caret {
+  flex: none;
+  align-self: center;
+  color: var(--cds-text-muted);
+}
+
+.agent-card-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   Hooks, auto-review, notices, todos, cards */
+
+/* c96d752d0 NZ in the error card (cb1a6e506): a tinted head, the hint, 编辑提示. */
+.hook-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: fit-content;
+  min-width: min(480px, 100%);
+  max-width: 100%;
+  overflow: clip;
+  border-radius: var(--cds-radius-card);
+  user-select: text;
+}
+
+.hook-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  pointer-events: none;
+}
+
+.hook-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-md);
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-primary);
+  overflow-wrap: break-word;
+}
+
+.hook-card-icon {
+  flex: none;
+  color: var(--cds-text-danger);
+}
+
+.hook-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-md);
+  padding: var(--cds-pad-lg);
+}
+
+.hook-card-hint {
+  color: var(--cds-text-secondary);
+  white-space: pre-line;
+  overflow-wrap: break-word;
+}
+
+.hook-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--cds-gap-sm);
+}
+
+.review-done {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+}
+
+/* c96d752d0 Lq: a footnote sentence in secondary with inline links, " · " between them; the
+   detail shows on hover. */
+.session-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 6px;
+  min-width: 0;
+  padding-inline-start: 4px;
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  animation: epitaxy-hint-fade-in 0.4s cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+
+.session-line-text {
+  min-width: 0;
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.session-line-text[tabindex]:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.session-action {
+  display: inline-flex;
+  flex: none;
+  align-items: baseline;
+  column-gap: 6px;
+}
+
+.session-dot {
+  color: var(--cds-text-secondary);
+  user-select: none;
+}
+
+.session-link {
+  border-radius: 2px;
+  color: var(--cds-text-accent);
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in srgb, currentColor, transparent 60%);
+  text-underline-offset: 3px;
+}
+
+.session-link:is(:hover, :focus-visible) {
+  text-decoration-color: currentColor;
+}
+
+.session-link:disabled {
+  opacity: var(--cds-opacity-disabled);
+}
+
+/* c96d752d0 Wq: the error with a danger glyph, then 查看详情 (cb1a6e506 O / k). */
+/* cb1a6e506 I: an outlined card at least 480 wide (the column allowing), clipped to its corners;
+   the headline on an alpha-1 band (px-lg py-md, gap-md after the warning glyph, body primary), the
+   hint in body secondary (pt-lg), then 查看详情 and the actions at the row end. */
+.error-row {
+  display: flex;
+  flex-direction: column;
+  width: fit-content;
+  min-width: min(480px, 100%);
+  max-width: 100%;
+  overflow: clip;
+  border-radius: var(--cds-radius-card);
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  text-align: start;
+  user-select: text;
+}
+
+.error-row-head {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-md);
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-primary);
+}
+
+.error-row-head > span:last-child {
+  flex-grow: 1;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.error-row-icon {
+  flex: none;
+  color: var(--cds-text-danger);
+}
+
+.error-row-hint {
+  padding: var(--cds-pad-lg) var(--cds-pad-lg) 0;
+  color: var(--cds-text-secondary);
+  white-space: pre-line;
+  overflow-wrap: break-word;
+}
+
+.error-row-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  padding: var(--cds-pad-md) var(--cds-pad-lg) var(--cds-pad-lg);
+}
+
+.error-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+  max-width: 100%;
+  margin-inline-start: auto;
+}
+
+.error-row-details {
+  margin: 0 var(--cds-pad-lg) var(--cds-pad-lg);
+}
+
+.details-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 4px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  white-space: nowrap;
+}
+
+.details-toggle:hover {
+  color: var(--cds-text-primary);
+}
+
+.details-box {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: calc(var(--cds-h-control) + 8px);
+  padding: var(--cds-pad-sm) calc(var(--cds-h-control) + 4px + var(--cds-pad-sm)) var(--cds-pad-sm) var(--cds-pad-md);
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  user-select: text;
+}
+
+.details-copy {
+  position: absolute;
+  top: 4px;
+  inset-inline-end: 4px;
+  display: flex;
+}
+
+/* cb6930dae Rd: the proposed plan as plain text, pad-md in behind a 2px rule, the rule pad-xs
+   past it while proposed; settled, it sits pad-xs in, under 已批准计划 when approved (gap-1). */
+.plan-text {
+  padding-inline-start: var(--cds-pad-md);
+  border-inline-start: 2px solid var(--cds-border);
+  color: var(--cds-text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  unicode-bidi: plaintext;
+}
+
+.plan-text[data-live] {
+  padding-block: var(--cds-pad-xs);
+}
+
+.plan-settled {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing);
+  padding-block: var(--cds-pad-xs);
+}
+
+.plan-approved {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing);
+  color: var(--cds-text-success);
+}
+
+.review-card {
+  --cds-assistant-message-text-inset: 0px;
+  --cds-assistant-message-text-stop: 0px;
+  display: grid;
+  gap: var(--cds-pad-sm);
+  min-width: 0;
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-2);
+  box-shadow: var(--cds-shadow-card-ring);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cds-text-secondary);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+/* ---------------------------------------------------------------------------
+   File diffs (diffs, classic +/- indicators: code 12/17 mono, rows tinted 20% in the git
+   colors, hunks 4px apart). The changes pane uses FileDiffCard too. */
+
+.file-diff {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+}
+
+.file-diff-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  font-size: var(--cds-font-size-body);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--cds-dur-fast) ease-out;
+}
+
+.file-diff-toggle {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 8px;
+  border-radius: 4px;
+  cursor: inherit;
+}
+
+.file-diff-toggle:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.file-diff-head:hover {
+  background: var(--cds-alpha-1);
+}
+
+/* c44d00c7f ml: a head with nothing to open (no lines) is aria-disabled, its caret at 40%. */
+.file-diff-head:has(> [aria-disabled]) {
+  cursor: default;
+}
+
+.file-diff-toggle[aria-disabled] > .tool-caret {
+  opacity: 0.4;
+}
+
+.file-kind {
+  flex: none;
+}
+
+.file-kind-add {
+  color: var(--cds-success);
+}
+
+.file-kind-delete {
+  color: var(--cds-fill-danger);
+}
+
+.file-kind-update {
+  color: var(--cds-text-secondary);
+}
+
+/* c219730b0 Lt: nothing in the head grows; the notes and +N −N follow the path. */
+.file-path {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--cds-font-size-code);
+}
+
+/* c219730b0 Lt: what the head notes after the path, muted: where the file moved from (zt) and the
+   labels (It). They give way before the path does (shrink-[9999]); its tip says them all. */
+.file-diff-moved,
+.file-diff-label {
+  flex: 0 9999 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-diff-moved {
+  display: flex;
+  gap: 4px;
+}
+
+.file-diff-moved > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-diff-moved > span:nth-child(2) {
+  flex-shrink: 9999;
+}
+
+.diff {
+  max-height: 400px;
+  overflow: auto;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font-family: var(--font-mono);
+  font-size: var(--cds-font-size-code);
+  line-height: var(--cds-leading-code);
+}
+
+.file-diff > .diff {
+  box-shadow: inset 0 1px 0 var(--cds-border);
+}
+
+.diff-row {
+  display: grid;
+  grid-template-columns: 42px 42px minmax(0, 1fr);
+  min-width: max-content;
+}
+
+.diff-no {
+  padding: 0 8px;
+  color: var(--cds-text-disabled);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.diff-code {
+  padding: 0 14px 0 4px;
+  white-space: pre;
+}
+
+.diff-sign {
+  display: inline-block;
+  width: 14px;
+  color: var(--cds-text-muted);
+  user-select: none;
+}
+
+.diff-add {
+  background: var(--cds-bg-git-added);
+}
+
+.diff-add .diff-sign {
+  color: var(--cds-text-git-added);
+}
+
+.diff-del {
+  background: var(--cds-bg-git-removed);
+}
+
+.diff-del .diff-sign {
+  color: var(--cds-text-git-removed);
+}
+
+/* A whole new or deleted file (Pu): the line numbers take the git color too. */
+.diff[data-pure] .diff-add .diff-no {
+  color: var(--cds-text-git-added);
+}
+
+.diff[data-pure] .diff-del .diff-no {
+  color: var(--cds-text-git-removed);
+}
+
+.diff-gap {
+  height: 4px;
+}
+
+/* cb6930dae Nu: too big for a diff, the removed and the added text, 200px each. */
+.diff-split {
+  overflow: visible;
+  background: none;
+}
+
+.diff-note {
+  margin: 0;
+  padding: var(--cds-pad-xs) var(--cds-pad-md);
+  color: var(--cds-text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
+}
+
+.diff-side {
+  max-height: 200px;
+  margin: 0;
+  padding: 0 var(--cds-pad-md);
+  overflow-y: auto;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------------------
+   Message actions (c96d752d0 lI / oI): 24px ghost keys, then the model and time in text-body
+   muted, tabular, at the density's size (the text size leaves toolbars alone, css 65038). */
+
+.msg-actions {
+  min-height: var(--cds-h-control);
+  color: var(--cds-text-muted);
+}
+
+/* A running reply's row holds only 在后台运行: with nothing to move there it takes no room, as
+   Claude's last-row controls are empty:hidden (c4de0b325 vve). The tail's card or working line
+   then sits a turn gap under the reply, and gap-xs under the row while it shows (yve). */
+.msg-actions:empty {
+  display: none;
+}
+
+.turn:has(> .reply-row > .msg-actions:not(:empty)) + :is(.working-line, .turn-plan, .turn-next) {
+  margin-top: var(--cds-gap-xs);
+}
+
+.msg-meta {
+  min-width: 0;
+  overflow: hidden;
+  padding-inline-start: var(--cds-pad-md);
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msg-time {
+  padding-inline-end: var(--cds-pad-md);
+}
+
+/* ---------------------------------------------------------------------------
+   Working line with the chat chrome (code-working-line: c96d752d0 Het / Vet over c734f318c
+   TurnStatus): h-control tall, 16px under the reply (the loader row, compact mt-4) or a turn gap
+   under the plan card. One row, padded to h-control, its text 4px in like the reply's, body size
+   in muted: Claude's working mark in a 20px slot 12px ahead of the text, then the busy label in
+   secondary under the shimmer, the clock and the rest, gap-xs apart with a "·" between those
+   (DM); an empty label takes its gap back (-me-xs). */
+
+.working-line {
+  display: flex;
+  flex-direction: column;
+  min-height: var(--cds-h-control);
+  margin-top: 16px;
+}
+
+.turn-plan + .working-line {
+  margin-top: var(--chat-turn-gap);
+}
+
+/* Quiet while a row holds the turn's mark, it keeps its height (Het). */
+.working-line[data-quiet] {
+  visibility: hidden;
+}
+
+.working-row {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+  padding: calc((var(--cds-h-control) - 1lh) / 2) 4px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  white-space: nowrap;
+}
+
+.working-mark-slot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 1lh;
+  margin-inline-end: calc(12px - var(--cds-gap-xs));
+}
+
+.working-text {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.working-text[data-empty] {
+  margin-inline-end: calc(-1 * var(--cds-gap-xs));
+}
+
+/* The label's faces (HM's VM): rows that centre the label. Only the slot clips, and only across
+   while it glides, so the tasks key keeps the hit area it spills above and below; the busy label
+   truncates itself (Gj). */
+.working-label {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.working-label > .shimmer {
+  min-width: 0;
+  overflow-x: clip;
+  text-overflow: ellipsis;
+}
+
+.working-dot {
+  flex: none;
+  user-select: none;
+}
+
+/* DM: the clock and the rest count in tabular figures; the label does not. */
+.working-segment {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  min-width: 0;
+  height: 1lh;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The mark (cc39db724): 20px; a 7px clay dot until the sheets decode, then one 20px window over
+   each mounted sheet, all but the playing one at opacity .001 so they stay painted. */
+.working-mark {
+  position: relative;
+  display: block;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  color: var(--cds-clay);
+  user-select: none;
+}
+
+.working-mark-dot,
+.working-sprite {
+  position: absolute;
+  inset: 0;
+  display: block;
+  margin: auto;
+}
+
+.working-mark-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.working-sprite {
+  width: 20px;
+  height: 20px;
+}
+
+.working-sprite-layer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+}
+
+.working-sprite-layer > span {
+  display: block;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+
+/* The tasks toggle and the Codex retry key: plain text, accent on hover, 10px of extra hit area
+   above and below (w8 K). */
+.working-action {
+  position: relative;
+  border-radius: 4px;
+  color: inherit;
+}
+
+.working-action::before {
+  content: "";
+  position: absolute;
+  inset: -10px 0;
+}
+
+.working-action:hover {
+  color: var(--cds-text-accent);
+}
+
+.working-action[aria-pressed="true"] {
+  color: var(--cds-text-primary);
+}
+
+.working-action:disabled {
+  opacity: var(--cds-opacity-disabled);
+}
+
+/* ---------------------------------------------------------------------------
+   Plan card (cccc2cf0a ET around DT over cb6930dae Lu, mutedDone): a turn gap under the working
+   line, a card ringed 1px inside, p-4 with its lines gap-1 apart, in the message body size. Steps
+   gap-xs apart, a 16px status column one line tall 4px before the text: done ones secondary
+   under a filled check, open ones primary under the sm spinner at 1.6s a turn (c96d752d0 QX) or a
+   dotted ring while held, the rest under a muted dashed ring. Notes are caption muted, the step
+   counts ps-6; the running tasks a ghost xs button mt-0.5 under the open step (OT). */
+.turn-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--chat-turn-gap);
+  padding: 16px;
+  overflow: clip;
+  border-radius: var(--cds-radius-card);
+  box-shadow: inset 0 0 0 1px var(--cds-ring-color);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: break-word;
+}
+
+/* pA motion-safe:animate-fade-in: 0.3s as the card shows up (PlanCard says when, data-fade). */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduce-motion="true"]) .turn-plan[data-fade] {
+    animation: 0.3s cubic-bezier(0.25, 0.1, 0.35, 1) cds-fade-in;
+  }
+}
+
+.turn-plan-note {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
+  user-select: text;
+}
+
+.turn-plan-note[data-indent] {
+  padding-inline-start: 24px;
+}
+
+.turn-plan-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  user-select: text;
+}
+
+.turn-plan-steps > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.turn-plan-steps > li[data-status="completed"] {
+  --code-chip-ink: currentColor;
+  color: var(--cds-text-secondary);
+}
+
+.turn-plan-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 1lh;
+}
+
+li[data-status="pending"] > .turn-plan-icon {
+  color: var(--cds-text-muted);
+}
+
+.turn-plan-icon .spinner::after {
+  animation-duration: 1.6s;
+}
+
+.turn-plan-step {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The steps are epitaxy-markdown, not prose (cb6930dae Lu renders c19e90103 Ix at its default
+   typography): its `:not(pre)>code` chip in primary ink at the body less 1px, 4px corners, 1 / 2px
+   padding, line-height 1.4, no hairline; done steps pass currentColor through --code-chip-ink. */
+.turn-plan .markdown :not(pre) > code {
+  padding: 1px 2px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--code-chip-ink, var(--cds-text-primary));
+  font-size: calc(var(--chat-body) - 1px);
+  line-height: 1.4;
+  white-space: inherit;
+}
+
+.turn-plan-tasks {
+  max-width: 100%;
+  margin-top: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+   Session chapters (cf74bc599 aC / oC / sC): ticks 14px wide in the 32px gutter, 8px apart;
+   the current one 85% ink, the rest 9/14 wide at 20%. Hover or focus opens a list as wide as
+   its titles, 232px to 320px (w-max); the rename field sizes to its text (field-sizing). */
+
+.epitaxy-toc {
+  position: absolute;
+  top: 20px;
+  bottom: 32px;
+  inset-inline-start: 0;
+  z-index: 11;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.epitaxy-toc[data-ready] {
+  visibility: visible;
+  animation: epitaxy-toc-fade-in 0.18s ease-out 0.12s both;
+}
+
+.toc-nav {
+  position: relative;
+  width: var(--chat-gutter);
+  height: 100%;
+  border-radius: var(--cds-radius);
+  outline: none;
+}
+
+.toc-nav:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.toc-ticks {
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+  margin: 0;
+  padding: 5px 0 5px calc(var(--chat-gutter) * 3 / 16);
+  overflow: hidden;
+  list-style: none;
+  pointer-events: auto;
+}
+
+.toc-ticks > li {
+  display: flex;
+  align-items: center;
+  flex: none;
+  height: 8px;
+}
+
+.toc-ticks span {
+  display: block;
+  width: calc(var(--chat-gutter) * 3 / 8 + 2px);
+  height: 2px;
+  border-radius: 999px;
+  background: var(--cds-alpha-3);
+  transform-origin: left;
+  scale: calc(9 / 14) 1;
+  transition:
+    scale 0.2s,
+    background-color 0.2s;
+}
+
+.toc-ticks > li[data-current] span {
+  background: var(--cds-alpha-8);
+  scale: 1;
+}
+
+.toc-panel {
+  position: absolute;
+  top: 0;
+  inset-inline-start: 0;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  min-width: 232px;
+  max-width: 320px;
+  max-height: 100%;
+  padding-block: var(--cds-pad-sm);
+  border-radius: 8px;
+  background: var(--cds-surface-popover);
+  box-shadow: var(--cds-shadow-menu);
+  visibility: hidden;
+  opacity: 0;
+  translate: -4px 0;
+  transition:
+    opacity 150ms ease-out,
+    translate 150ms ease-out,
+    visibility 150ms ease-out;
+}
+
+.toc-panel[data-open] {
+  visibility: visible;
+  opacity: 1;
+  translate: none;
+  pointer-events: auto;
+}
+
+.toc-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  margin: 0;
+  padding: 0 var(--cds-pad-xs);
+  overflow-y: auto;
+  list-style: none;
+}
+
+.toc-row {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  width: 100%;
+  height: var(--cds-h-control);
+  padding: 0 5px;
+  border-radius: 5px;
+  color: var(--cds-text-secondary);
+  text-align: start;
+}
+
+button.toc-row:hover {
+  background: var(--cds-fill-ghost-hover);
+  color: var(--cds-text-primary);
+}
+
+.toc-row[aria-current] {
+  color: var(--cds-text-primary);
+}
+
+.toc-mark {
+  display: block;
+  flex: none;
+  width: 9px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--cds-alpha-3);
+  transition: background-color 150ms;
+}
+
+button.toc-row:hover .toc-mark {
+  background: var(--cds-alpha-5);
+}
+
+.toc-row[aria-current] .toc-mark {
+  width: 14px;
+  background: var(--cds-alpha-8);
+}
+
+.toc-row[data-editing] .toc-mark {
+  width: 10px;
+  background: var(--cds-alpha-8);
+}
+
+.toc-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toc-input {
+  flex: 1;
+  min-width: 0;
+  field-sizing: content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--cds-text-primary);
+  font: inherit;
+  outline: none;
+}
+
+.toc-input:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+/* ---------------------------------------------------------------------------
+   Menus at the pointer, jump to latest, find hits */
+
+.transcript-menu-host {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+}
+
+.pointer-anchor {
+  position: fixed;
+  width: 0;
+  height: 0;
+}
+
+/* Jump to latest with the chat chrome (cf854d0e8): a 36px round key 20px above the dock (mb-5),
+   a 0.5px ring, the surface at 80% over an 8px blur, shadow md (lg on hover) under a ghost-hover
+   wash, opacity over 200ms and inert while hidden. While the turn works the ring takes the brand
+   at 30% and Claude's working mark stands in for the arrow, which comes back on hover or focus;
+   the mark fades in and, once the turn ends, out over 200ms. */
+.jump-host {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  z-index: 1;
+  translate: -50% 0;
+}
+
+.jump-latest {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 4px;
+  overflow: hidden;
+  border: 0.5px solid var(--cds-border);
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--cds-surface-3) 80%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--cds-shadow-md);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 200ms,
+    border-color 200ms;
+}
+
+.jump-latest::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transition: background-color 200ms;
+}
+
+.jump-latest:hover {
+  box-shadow: var(--cds-shadow-lg);
+}
+
+.jump-latest:hover::before {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.jump-latest:focus-visible {
+  box-shadow: var(--cds-shadow-md), var(--cds-focus-shadow);
+  outline: none;
+}
+
+.jump-latest[data-shown] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.jump-latest[data-streaming] {
+  border-color: color-mix(in oklab, var(--cds-fill-brand) 30%, transparent);
+}
+
+.jump-latest > [data-cds="Icon"] {
+  position: relative;
+  mix-blend-mode: luminosity;
+  transition: opacity 200ms ease-out;
+}
+
+.jump-latest > .working-mark {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  transition: opacity 200ms ease-out;
+
+  @starting-style {
+    opacity: 0;
+  }
+}
+
+.jump-latest[data-streaming] > [data-cds="Icon"],
+.jump-latest:not([data-streaming]) > .working-mark,
+.jump-latest[data-streaming]:is(:hover, :focus-visible) > .working-mark {
+  opacity: 0;
+}
+
+.jump-latest[data-streaming]:is(:hover, :focus-visible) > [data-cds="Icon"] {
+  opacity: 1;
+}
+
+/* Find (U25): Chromium's find colors, the active match orange. */
+::highlight(find-hit) {
+  background-color: #ffff00;
+  color: #000;
+}
+
+::highlight(find-hit-active) {
+  background-color: #ff9632;
+  color: #000;
+}
+
+/* ---------------------------------------------------------------------------
+   Image preview (W17 cd5136de8; Code tab c4b054ed5, backdrop "dim"): 80% black without blur, a
+   gradient bar holding the round close button (52px down under a desktop title row), the image
+   in a 75vw x 70vh box with 1rem corners. A's viewImage / closeImage morph it from the thumbnail,
+   so the overlay itself never animates. */
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-portal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: rgb(0 0 0 / 80%);
+  -webkit-app-region: no-drag;
+}
+
+.lightbox-bar {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--cds-gap-xs);
+  padding: 16px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--cds-black) 80%, transparent) 0%,
+    color-mix(in srgb, var(--cds-black) 80%, transparent) 75%,
+    color-mix(in srgb, var(--cds-black) 0%, transparent) 100%
+  );
+  pointer-events: none;
+}
+
+:root[data-wco] .lightbox-bar {
+  padding-top: 52px;
+}
+
+.lightbox-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: rgb(255 255 255 / 70%);
+  pointer-events: auto;
+}
+
+.lightbox-close:hover {
+  background: rgb(255 255 255 / 10%);
+  color: #fff;
+}
+
+/* c4b054ed5: the images side by side, each in a 75vw slide 32px apart, the shown one centred;
+   the others at 40% (70% hovered), a click away. */
+.lightbox-track {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  transform: translateX(calc(12.5vw - var(--slide) * (75vw + 32px)));
+  transition: transform 0.3s ease-out;
+}
+
+.lightbox-slide {
+  display: flex;
+  flex: 0 0 75vw;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  outline: none;
+}
+
+/* Zoomed, the slide rises over its neighbours; the shown one, focused from the keyboard, rings its image. */
+.lightbox-slide[data-zoomed] {
+  position: relative;
+  z-index: 10;
+}
+
+.lightbox-slide:focus-visible > .lightbox-img {
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 70%);
+}
+
+.lightbox-img {
+  max-width: 100%;
+  max-height: 70vh;
+  border-radius: 1rem;
+  object-fit: contain;
+  opacity: 0.4;
+  cursor: var(--cds-cursor-interactive);
+  transition: opacity 0.3s;
+}
+
+.lightbox-img:hover {
+  opacity: 0.7;
+}
+
+.lightbox-img[data-current] {
+  opacity: 1;
+  cursor: zoom-in;
+}
+
+/* Under them: the previous and next keys round 第 N 项，共 M 项, 24px up; at an end its key is 30%. */
+.lightbox-pager {
+  position: absolute;
+  inset: auto 0 24px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 56px;
+  padding: 0 24px;
+}
+
+.lightbox-page {
+  display: grid;
+  place-items: center;
+  padding: 8px;
+  border-radius: 8px;
+  color: #fff;
+}
+
+.lightbox-page:not([aria-disabled="true"]):hover {
+  background: rgb(255 255 255 / 10%);
+}
+
+.lightbox-page[aria-disabled="true"] {
+  color: rgb(255 255 255 / 30%);
+  cursor: default;
+}
+
+.lightbox-count {
+  padding: 0 8px;
+  color: rgb(255 255 255 / 80%);
+  font-size: 14px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  user-select: none;
+}
+
+.lightbox-img[data-zoomed] {
+  cursor: zoom-out;
+  touch-action: none;
+  translate: 0 0 1px;
+}
+
+/* ---------------------------------------------------------------------------
+   Reduced motion and touch: drop what the original drops (the shimmer, the bubble and
+   receipt entrances, the flash — a still alpha-2 tint instead —, the table of contents fade,
+   the morphs); keys stay visible without hover. */
+
+@media (prefers-reduced-motion: reduce) {
+  .toc-panel,
+  .row-actions,
+  .msg-actions,
+  .thinking-copy,
+  .copy-key,
+  .tool-line,
+  .tool-group-line,
+  .jump-latest > *,
+  .lightbox-track,
+  .lightbox-img {
+    transition: none;
+  }
+
+  .user-row[data-entering],
+  .question-receipt[data-enter],
+  .receipt,
+  .receipt-check,
+  .session-line,
+  .epitaxy-toc[data-ready],
+  .diff-pill[data-enter] {
+    animation: none;
+  }
+
+  .user-bubble[data-flash]::after {
+    animation: none;
+    background: var(--cds-alpha-2);
+  }
+}
+
+:root[data-reduce-motion="true"] :is(.toc-panel, .row-actions, .msg-actions, .thinking-copy, .copy-key, .tool-line, .tool-group-line, .jump-latest > *) {
+  transition: none;
+}
+
+:root[data-reduce-motion="true"]
+  :is(
+    .user-row[data-entering],
+    .question-receipt[data-enter],
+    .receipt,
+    .receipt-check,
+    .session-line,
+    .epitaxy-toc[data-ready],
+    .diff-pill[data-enter]
+  ) {
+  animation: none;
+}
+
+:root[data-reduce-motion="true"] .user-bubble[data-flash]::after {
+  animation: none;
+  background: var(--cds-alpha-2);
+}
+
+@media (pointer: coarse), (hover: none) {
+  .row-actions,
+  .msg-actions,
+  .thinking-copy,
+  .copy-key {
+    opacity: 1;
+    pointer-events: auto;
+    transition: none;
+  }
+}
+
+
+/* ---------------------------------------------------------------------------
+   Side sessions (SessionCards.tsx, live c3fef5c6f): a turn's proposals in one ledger card (eb,
+   max 480, ring, card radius), its head (nb: alpha-1 band), rows (rb: px-lg py-md, border-t but
+   the first), a proposal's actions (pb), and a started session's row (ev: card or listRow). */
+
+.session-ledger {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  margin-block: 6px;
+}
+
+.session-ledger-box {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 480px;
+  overflow: clip;
+  border-radius: var(--cds-radius-card);
+  box-shadow: 0 0 0 1px var(--cds-border);
+  user-select: text;
+}
+
+.session-ledger-head {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-md);
+  min-width: 0;
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.session-ledger-count {
+  color: var(--cds-text-muted);
+}
+
+/* ib: Start all at the head's end. */
+.session-ledger-all {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  margin: calc(-1 * var(--cds-pad-xs)) calc(-1 * var(--cds-pad-sm)) calc(-1 * var(--cds-pad-xs)) auto;
+}
+
+.session-ledger-row,
+.session-ledger-child,
+.session-ledger-more {
+  display: flex;
+  min-width: 0;
+  border-top: 1px solid var(--cds-border);
+}
+
+.session-ledger-row {
+  gap: var(--cds-gap-md);
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.session-ledger-box > :first-child {
+  border-top: 0;
+}
+
+.session-ledger-row[data-centered] {
+  align-items: center;
+}
+
+.session-ledger-row[data-column] {
+  flex-direction: column;
+}
+
+.session-ledger-busy,
+.session-ledger-settled {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cds-text-primary);
+}
+
+.session-ledger-settled:not([data-failed]) {
+  color: var(--cds-text-muted);
+}
+
+.session-ledger-label {
+  flex-shrink: 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.session-ledger-label[data-failed] {
+  color: var(--cds-text-danger);
+}
+
+.session-ledger-more {
+  padding: var(--cds-pad-xs) var(--cds-pad-sm);
+}
+
+.session-proposal-top {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cds-gap-md);
+  min-width: 0;
+}
+
+.session-proposal-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.session-proposal-title,
+.session-proposal-line {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+.session-proposal-title {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-weight: var(--cds-font-weight-medium);
+  text-align: start;
+}
+
+button.session-proposal-title {
+  cursor: pointer;
+}
+
+button.session-proposal-title:focus-visible {
+  border-radius: 4px;
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.session-proposal-line {
+  color: var(--cds-text-secondary);
+}
+
+.session-proposal-where {
+  color: var(--cds-text-primary);
+}
+
+/* ab: the ✕ sits in the title's first line. */
+.session-proposal-dismiss {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  height: 1lh;
+  margin-inline-end: calc(-1 * var(--cds-pad-sm));
+}
+
+.session-proposal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--cds-gap-xs);
+  min-width: 0;
+}
+
+.session-proposal-lead {
+  display: flex;
+  flex-grow: 1;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+}
+
+.session-proposal-buttons {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  margin-inline-start: auto;
+}
+
+/* The brief (w-120 max-w-[90vw], at most min(50vh, 360px) of footnote text) and 选项 (w-114). */
+.session-brief {
+  width: 480px;
+  max-width: 90vw;
+}
+
+.session-brief-body {
+  max-height: min(50vh, 360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-inline-end: 3px;
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.session-options {
+  width: 456px;
+  max-width: 90vw;
+}
+
+.session-options-body {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+/* ev: a started session, a card alone (min-h 35, 440 wide at least, rounded-lg ring) or a row in the ledger. */
+.session-child {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  text-align: start;
+  cursor: pointer;
+}
+
+.session-child[data-frame="card"] {
+  align-self: flex-start;
+  width: fit-content;
+  min-width: min(100%, 440px);
+  max-width: max(75%, min(100%, 440px));
+  min-height: 35px;
+  padding: var(--cds-pad-sm) var(--cds-pad-md) var(--cds-pad-sm) 10px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+}
+
+.session-child[data-frame="listRow"] {
+  flex: 1;
+  padding: var(--cds-pad-md) var(--cds-pad-md) var(--cds-pad-md) var(--cds-pad-lg);
+}
+
+.session-child:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.session-child:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.session-child-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 6ch;
+}
+
+.session-child-title,
+.session-child-caption {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-child-caption {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
+}
+
+.session-child-end {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  height: var(--cds-leading-body);
+}
+
+.session-child-state {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+}
+
+.session-child-state[data-tone="warning"] {
+  color: var(--cds-text-warning);
+}
+
+.session-child-state[data-tone="danger"] {
+  color: var(--cds-text-danger);
+}
+
+.session-child-caret {
+  color: var(--cds-text-muted);
+}
+
+/* A turn opened by a brief, the report-back event or another session's message (c63275c0a Wx /
+   CT / YT): its row leads the turn on the left, where your bubble would sit on the right. */
+.turn-opener {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: var(--cds-gap-xs);
+}
+
+.session-brief-from {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+}
+
+.session-brief-parent,
+.session-peer-from {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.session-brief-parent:hover,
+.session-peer-from:hover {
+  text-decoration: underline;
+}
+
+.session-brief-archived {
+  color: var(--cds-text-muted);
+}
+
+.session-brief-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-sm);
+  padding-block: var(--cds-pad-xs);
+}
+
+.session-brief-step {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.session-brief-label {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+/* YT: rounded-lg, border alpha-2, alpha-1 fill, p-sm. */
+.session-peer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: var(--cds-pad-sm);
+  border: 1px solid var(--cds-alpha-2);
+  border-radius: 8px;
+  background: var(--cds-alpha-1);
+}
+
+.session-peer-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.session-peer-text {
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+/* The next-step box wrap_up fills (c9bd7af9c AN / mN): the plan card's shell, 16px in, the recap
+   in secondary ink over the question in primary, each line ending in the dismiss key, then the
+   answers wrapping with 12px between them; a label past 16 characters grows from 96px and clips. */
+.turn-next {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-md);
+  min-width: 0;
+  margin-top: var(--chat-turn-gap);
+  padding: 16px;
+  overflow: clip;
+  border-radius: var(--cds-radius-card);
+  box-shadow: inset 0 0 0 1px var(--cds-ring-color);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: break-word;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduce-motion="true"]) .turn-next {
+    animation: 0.3s cubic-bezier(0.25, 0.1, 0.35, 1) cds-fade-in;
+  }
+}
+
+.turn-next-line {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+}
+
+.turn-next-recap,
+.turn-next-ask {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: break-word;
+  user-select: text;
+}
+
+.turn-next-recap {
+  color: var(--cds-text-secondary);
+}
+
+.turn-next-ask {
+  color: var(--cds-text-primary);
+}
+
+.turn-next-dismiss {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  height: 1lh;
+  margin-inline-end: calc(var(--cds-pad-xs) * -1);
+}
+
+.turn-next-dismiss .btn {
+  color: var(--cds-text-muted);
+}
+
+.turn-next-dismiss .btn:hover {
+  color: var(--cds-text-primary);
+}
+
+.turn-next-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+}
+
+.turn-next-chips .btn {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.turn-next-chips .turn-next-chip {
+  min-width: 96px;
+  max-width: max-content;
+  flex: 1 0 96px;
+}
+
+.turn-next-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A box the next message answered (c4de0b325 A8 over cb6930dae kl): the answered-question receipt
+   with the recap in secondary ink gap-sm over its question and answer, those gap-0.5 apart. */
+.wrap-receipt > div {
+  gap: var(--cds-gap-sm);
+}
+
+.wrap-receipt-recap {
+  color: var(--cds-text-secondary);
+  overflow-wrap: break-word;
+}
+
+.wrap-receipt-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* c4de0b325 vJ in its "see all" form: a card under the reply (epitaxy-summary-card-control-text:
+   body type, rounded-card, px-md py-xs, a 1px inset border ring), the label and 撤销 over a hairline
+   that reaches the card edge, then one row per file and a 查看全部 / 收起 row with the totals. */
+.turn-edits {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  margin-top: var(--cds-pad-xs);
+  padding: var(--cds-pad-xs) var(--cds-pad-md);
+  border-radius: var(--cds-radius-card);
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  user-select: text;
+}
+
+.turn-edits-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+  height: var(--cds-h-control);
+  padding-inline: var(--cds-pad-xs);
+}
+
+.turn-edits-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turn-edits-undo {
+  flex-shrink: 0;
+  font-size: var(--cds-font-size-footnote);
+}
+
+.turn-edits-sep {
+  flex-shrink: 0;
+  height: 1px;
+  margin-inline: calc(-1 * (var(--cds-pad-md) - 1px));
+  background: var(--cds-alpha-2);
+}
+
+.turn-edits ul {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.turn-edits-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+  margin-inline: calc(-1 * var(--cds-pad-xs));
+  padding-inline: var(--cds-pad-md);
+}
+
+.turn-edits-open {
+  display: flex;
+  flex-grow: 1;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  text-align: start;
+  cursor: var(--cds-cursor-interactive);
+}
+
+.turn-edits-open::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+}
+
+.turn-edits-open:hover::before {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.turn-edits-open:focus-visible {
+  outline: none;
+}
+
+.turn-edits-open:focus-visible::before {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.turn-edits-icon {
+  position: relative;
+  flex-shrink: 0;
+  color: var(--cds-text-muted);
+}
+
+.turn-edits-name {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turn-edits-dir {
+  position: relative;
+  flex-shrink: 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  white-space: nowrap;
+}
+
+.turn-edits-counts {
+  position: relative;
+  pointer-events: none;
+  font-size: var(--cds-font-size-footnote);
+}
+
+/* c4de0b325 Hge / Uge and c63275c0a zx: a fork's status line, muted, the session it names in
+   primary as a link. */
+.fork-marker {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+  min-height: var(--cds-h-control--xs);
+  padding-inline-start: 4px;
+  color: var(--cds-text-muted);
+  white-space: nowrap;
+}
+
+.fork-marker-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-primary);
+  text-overflow: ellipsis;
+}
+
+.fork-marker-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: var(--cds-cursor-interactive);
+}
+
+button.fork-marker-link:not(.fork-marker-title) {
+  color: var(--cds-text-secondary);
+}
+
+.fork-marker-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.fork-marker-when {
+  flex-shrink: 0;
+  font-size: var(--cds-font-size-footnote);
+}
+
+/* c4de0b325 h_e: an idle session's compaction hint, footnote and secondary, the link after it. */
+.stale-compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 6px;
+  min-width: 0;
+  padding-inline-start: 4px;
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  animation: cds-fade-in var(--cds-dur-slow, 0.3s) ease-out;
+}
+
+.stale-compact-text {
+  min-width: 0;
+  color: var(--cds-text-secondary);
+  border-radius: 4px;
+  outline: none;
+}
+
+.stale-compact-text:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+/* cf74bc599 uw / ng: the 回复 key over a selection and the reply box above it (fixed to the
+   selection's rect, lifted by their own height). */
+.selection-reply-key,
+.selection-reply {
+  position: fixed;
+  z-index: 30;
+  transform: translateY(calc(-100% - 6px));
+}
+
+.selection-reply {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-sm);
+  width: min(360px, calc(100vw - 16px));
+  padding: var(--cds-pad-md);
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+  box-shadow: var(--cds-shadow-md), inset 0 0 0 1px var(--cds-border);
+}
+
+.selection-reply-quote {
+  display: -webkit-box;
+  margin: 0;
+  padding-inline-start: var(--cds-pad-sm);
+  overflow: hidden;
+  border-inline-start: 2px solid var(--cds-border);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.selection-reply-input {
+  width: 100%;
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  resize: none;
+}
+
+.selection-reply-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--cds-gap-sm);
+}
+
+.selection-reply-chord {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cds-text-muted);
+  font: inherit;
+  font-size: var(--cds-font-size-footnote);
+  cursor: var(--cds-cursor-interactive);
+}
+
+.selection-reply-chord:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* c4de0b325 feed: the message an arrow key moved to shows the focus ring. */
+.transcript [data-message]:focus-visible {
+  outline: none;
+  border-radius: var(--cds-radius-card);
+  box-shadow: var(--cds-focus-shadow);
+}
+
+/* c4de0b325 x0: the away recap's card, 10px corners, a hairline under its caption header. */
+.recap-card {
+  overflow: clip;
+  border: 1px solid var(--cds-border);
+  border-radius: 10px;
+  background: var(--cds-surface-1);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--cds-black, #000) 3%, transparent);
+}
+
+.recap-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--cds-border);
+}
+
+.recap-card-head h3 {
+  margin: 0;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-caption);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.recap-card-text {
+  margin: 0;
+  padding: 12px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  font-style: italic;
+  overflow-wrap: break-word;
+}
+
+/* 突出显示更改的字词 (cc8da1d42 [data-diff-span]): the base git color at 15% (light) / 20% (dark). */
+::highlight(diff-word-add) {
+  background-color: light-dark(color-mix(in srgb, var(--cds-text-git-added) 15%, transparent), color-mix(in srgb, var(--cds-text-git-added) 20%, transparent));
+}
+
+::highlight(diff-word-del) {
+  background-color: light-dark(color-mix(in srgb, var(--cds-text-git-removed) 15%, transparent), color-mix(in srgb, var(--cds-text-git-removed) 20%, transparent));
+}
+
+/* 侧边聊天 (Claude 4.4212 ca2ef848d: fixed bottom-4 end-4, w-[400px], max-h min(560px, 100dvh - 6rem),
+   rounded-2xl, border-0.5 border-strong, bg-surface-3, its two-layer shadow). */
+.side-chat {
+  position: fixed;
+  z-index: var(--z-popover);
+  inset-block-end: 16px;
+  inset-inline-end: 16px;
+  display: flex;
+  flex-direction: column;
+  width: 400px;
+  max-width: calc(100vw - 2rem);
+  max-height: min(560px, calc(100dvh - 6rem));
+  overflow: hidden;
+  border: 0.5px solid var(--cds-border-strong);
+  border-radius: 16px;
+  background: var(--cds-surface-3);
+  box-shadow:
+    0 24px 60px color-mix(in srgb, black 18%, transparent),
+    0 4px 16px color-mix(in srgb, black 8%, transparent);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+}
+.side-chat-head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+}
+.side-chat-title {
+  flex: 1;
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side-chat-keys {
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-caption);
+}
+.side-chat-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 12px 12px;
+}
+.side-chat-q {
+  align-self: flex-end;
+  max-width: 85%;
+  padding: 6px 10px;
+  border-radius: var(--cds-radius-bubble);
+  background: var(--cds-bg-user-message);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.side-chat-a {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.side-chat-note,
+.side-chat-error {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 4px 12px;
+  font-size: var(--cds-font-size-caption);
+}
+.side-chat-note {
+  color: var(--cds-text-secondary);
+}
+.side-chat-error {
+  color: var(--cds-text-danger);
+}
+.side-chat-input {
+  flex-shrink: 0;
+  margin: 0 8px 8px;
+  padding: 8px;
+  min-height: 52px;
+  max-height: 160px;
+  resize: none;
+  border: 0.5px solid var(--cds-border-strong);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--cds-text-primary);
+  font: inherit;
+  outline: none;
+}
+.side-chat-input:focus-visible {
+  border-color: var(--cds-border-stronger);
+}
+
+/* show_widget (Widget.tsx): the frame takes the column's width and the height it reports. */
+.widget-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+.widget-loading,
+.widget-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+}

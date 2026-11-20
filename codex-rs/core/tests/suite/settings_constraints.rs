@@ -187,8 +187,8 @@ async fn protected_model_settings_use_the_proposed_permissions(
     assert!(response.requests().is_empty());
 
     let expected = ThreadSettingsSnapshot {
-        codex_ui_context: None,
-        codex_ui_desktop_context: None,
+        better_codex_context: None,
+        better_codex_desktop_context: None,
         model: PROTECTED_MODEL.to_string(),
         collaboration_mode: initial.collaboration_mode.with_updates(
             Some(PROTECTED_MODEL.to_string()),

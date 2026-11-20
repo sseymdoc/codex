@@ -1,0 +1,5908 @@
+/* Pages: the Code session view's titlebar, the new-session (draft) page and the panes beside
+   the chat (changes, files, terminal, plan, background tasks). The Code view runs at compact
+   density (decisions §1); values below are the compact ones read from Claude Desktop
+   2.42304.0.0's ion-dist chunks (named per rule) unless a storybook line (SB:) is cited. */
+
+/* Code chat column (shared-6 dg / sg): --max-content-width and --chat-gutter come from
+   tokens.css (html[data-transcript-width]); the titlebar is 32 tall. The column is the chat
+   tile of Claude's tiles container (c9543da06: a 1px border over a top padding of shared-20 Vm,
+   8, or 4 while the titlebar is lifted into the chrome bar), so it starts 9 down, 5 lifted.
+   It is the tile's @container/tile-slot (shared-20), whose width narrows the chat gutters. */
+.main-col {
+  --chat-header-h: 32px;
+  container: tile-slot / inline-size;
+  padding-top: 9px;
+}
+
+/* shared-6 ag: in a tile 560 wide or less the chat column's gutters are 16, not 32 (the
+   transcript and the new-session page; the dock keeps its own). */
+@container tile-slot (max-width: 560px) {
+  :is(.transcript-wrap, .landing) {
+    --chat-gutter: 16px;
+  }
+}
+
+.main-col:not(:has(> .chat-header)) {
+  padding-top: 5px;
+}
+
+/* ---------------------------------------------------------------------------
+   Session titlebar (cc43287c9 wW -> shared-20 $o; classes in shared-6): in flow, 32 tall
+   (h-[2rem]), ps 0 / pe 12 (--titlebar-end-inset). Controls are 26 tall (shared-20 wf
+   [--cds-h-control:26px]) with 18px glyphs (shared-20 xf = 18) in secondary ink (Tf). Pane
+   heads take the same 26 (shared-20: the pane wrapper adds wf), see .pane-head. */
+
+.chat-header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
+  height: var(--chat-header-h);
+  padding-inline: 0 12px;
+}
+
+/* Sidebar collapsed: clear the floating trigger (the frame derives --df-trigger-right; 0 under WCO). */
+.chat-header[data-collapsed] {
+  padding-inline-start: calc(var(--df-trigger-right, 0px) + 8px);
+}
+
+/* Lifted (shared-6 Jm; Main.tsx Lifted): in the chrome bar's title slot the titlebar starts 9 in
+   and runs to the slot's end. */
+.dframe-chrome-title-slot > .chat-header {
+  flex: 1;
+  min-width: 0;
+  padding-inline: 9px 0;
+}
+
+.chat-header .btn {
+  --btn-h: 26px;
+  --btn-r: var(--cds-radius);
+  --btn-icon: 18px;
+  --btn-icon-wght: 577.8;
+  color: var(--cds-text-secondary);
+}
+
+.chat-header .btn:hover:not(:disabled) {
+  color: var(--cds-text-primary);
+}
+
+/* With the rail the lead opens on the empty origin slot (c73f45bc3 t_, origin null: shared-6 Yf
+   max(0, 1rem − the chat tile's padding and border)), 15 where no tile holds the titlebar: lifted
+   in Claude, and always here (better-codex draws no chat tile). */
+.header-lead {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding-inline-start: 15px;
+}
+
+.title-split {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* The title gives way, never the caret beside it. */
+.title-split > .popover-root {
+  flex: none;
+}
+
+/* The lead's controls take the density's height; only the cluster's are 26 (wf). */
+.header-lead .btn {
+  --btn-h: var(--cds-h-control);
+}
+
+/* Title (shared-6 qh, c9543da06 Ed / Dd): truncate · body 13/19 · 500 · primary, with px-xs
+   pulled back out (mx-outset), so the name starts on the lead's edge and the caret follows it
+   straight away. It takes whatever room the lead has. A click starts the inline rename (Od:
+   onClick = onStartEdit, tooltip 重命名 / the full title). */
+.chat-header .title-btn.btn {
+  --btn-px: var(--cds-pad-xs);
+  flex: 0 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
+  margin-inline: calc(-1 * var(--btn-px));
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+/* Rename field (cc43287c9 vW): as wide as the name (field-sizing), at least 32; no padding or
+   fill, so the name stays put; a 1.5px accent outline 1 out, r3, and no focus shadow. */
+.title-input {
+  min-width: 32px;
+  field-sizing: content;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
+  outline: 1.5px solid var(--cds-fill-accent);
+  outline-offset: 1px;
+  box-shadow: none;
+}
+
+/* The cluster keeps 24 clear of the title (shared-6 zh ps-[24px]): 16 plus the header's 4px gaps
+   on either side of the spacer. */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-inline-start: 16px;
+}
+
+/* ---------------------------------------------------------------------------
+   New-session (draft) page, the start-card face (cc43287c9 with the session-presets flag on):
+   新建会话 in the titlebar, the start card centred in the scroll area, the composer docked at the
+   bottom (.dock in composer.css). */
+
+/* Draft title (cc43287c9 wW h1): truncate · ps 10 · body · 500 · muted. */
+.draft-title {
+  min-width: 0;
+  margin: 0;
+  padding-inline-start: 10px;
+  overflow: hidden;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The scroll area between the titlebar and the dock (shared-18 yy, shared-6 yg: hidden
+   scrollbar, edge fades). ponytail: one 28px fade for both edges where the panel fades 32 at
+   the top and 48 at the bottom (c4a70913c PP); give scroll-fade-y two sizes if it shows. */
+.landing {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+/* The start card (StartCard.tsx) is Claude's markup with Claude's rules (claude.generated.css).
+   Kept here: better-codex's Popover wraps a menu row in .popover-root, which must not narrow it. */
+[data-testid="epitaxy-start-card"] .popover-root {
+  display: block;
+}
+
+/* The rest seat's list (cc43287c9 Aae he.Popup): no gutter, the row's width up to 26rem. */
+.popover.start-pop {
+  min-width: min(312px, 90vw);
+  max-width: min(416px, 90vw);
+  padding: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Session rail (Rail.tsx; cf74bc599 rD with the session-presets flag on). The titlebar toggle is
+   followed by a rule (c467aa787 Q: h-4 w-px bg-border). Docked (shared-18 ky): 280 wide beside
+   the chat, pt 12 / pb 3 (+8, below), 12 in from the edge, the cards 10 apart (hy) and each a rounded-card
+   with the card ring (my). Floating (By / Vy): the same column 12 in from the edge, pt 12 / pb 8,
+   in one bordered panel with the panel shadow; the cards go flat with a rule between them. A card
+   (c73f45bc3 Xv): py-md; its heading px-md, 26 tall, footnote-medium, the caret 12 muted and
+   turned while open, the summary footnote muted at the end (kept invisible while open). Rows
+   (c227f4d5e FL / BL): 26 tall, gap-sm, px-xs, body text, a 20px icon cell in secondary ink;
+   buttons take the ghost hover. */
+
+.header-rule {
+  flex: none;
+  width: 1px;
+  height: 16px;
+  background: var(--cds-border);
+}
+
+.session-row {
+  --session-rail-w: 280px;
+  --session-rail-end: 12px;
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.session-chat {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rail {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: var(--session-rail-w);
+  min-height: 0;
+  margin-inline-end: var(--session-rail-end);
+  /* Claude's pb-0.75 sits inside its tile frame's 8px bottom pad; better-codex has no frame, so the
+     8 joins the rail's own pad to keep the last card 12 above the window's edge as there. */
+  padding: 12px 0 11px;
+  outline: none;
+}
+
+/* Docked, the transcript's scroller runs on under the rail to the row's edge and pads back to the
+   same column, so its scrollbar is the window's last column (cf74bc599 railActive → shared-18 Dy:
+   -me / pe of the rail's width + end inset); the rail sits over it. */
+.session-row:has(> .rail:not([data-overlay])) .transcript {
+  margin-inline-end: calc(-1 * (var(--session-rail-w) + var(--session-rail-end)));
+  padding-inline-end: calc(var(--session-rail-w) + var(--session-rail-end));
+}
+
+.rail-scroll {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 1px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.rail[data-overlay] {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: var(--session-rail-end);
+  z-index: 6;
+  margin: 0;
+  padding: 12px 0 8px;
+}
+
+.rail[data-overlay] > .rail-surface {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: clip;
+  border: 1px solid var(--cds-border);
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+  box-shadow: var(--cds-shadow-md);
+  animation: cds-fade-in var(--cds-dur-base) var(--cds-ease-out) both;
+}
+
+.rail[data-overlay] .rail-scroll {
+  gap: 0;
+  padding: 0;
+}
+
+.rail-card {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  padding-block: var(--cds-pad-md);
+  border-radius: var(--cds-radius-card);
+  box-shadow: var(--cds-shadow-card-ring);
+}
+
+.rail[data-overlay] .rail-card {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.rail[data-overlay] .rail-card ~ .rail-card {
+  border-top: 1px solid var(--cds-border);
+}
+
+.rail-card-top {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  padding-inline: var(--cds-pad-md);
+}
+
+/* cdbb20c70 Ne: the heading stays tinted while the rail's menu opened from it is up. */
+.rail-card-top[data-rail-menu-open] .rail-card-head {
+  background: var(--cds-alpha-1);
+}
+
+.rail-card-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  min-height: 26px;
+  padding-inline: var(--cds-pad-xs);
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  text-align: start;
+}
+
+.rail-card-head > span:first-child {
+  flex: none;
+}
+
+.rail-card-caret {
+  flex: none;
+  color: var(--cds-text-muted);
+  transition: transform var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+.rail-card-head[aria-expanded="true"] .rail-card-caret {
+  transform: rotate(90deg);
+}
+
+.rail-card-summary {
+  min-width: 0;
+  margin-inline-start: auto;
+  padding-inline-start: var(--cds-pad-sm);
+  overflow: hidden;
+  color: var(--cds-text-muted);
+  font-weight: var(--cds-font-weight-regular);
+  font-variation-settings: var(--cds-font-wght-regular);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-card-summary[aria-hidden] {
+  visibility: hidden;
+}
+
+/* cdbb20c70 Te: the grip takes the summary's place while the heading is hovered or it has focus. */
+.rail-card-top:is(:hover, :has(.rail-grip:focus-visible)) .rail-card-summary {
+  opacity: 0;
+}
+
+/* cdbb20c70 Ee / De / I / c5220dfc1 O_: the heading's last 80px drag the card; the grip (six 2px
+   dots in a 20px box, 10px in from the card's edge) shows there on hover and takes the keys. */
+.rail-grab {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: 80px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.rail-grip {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 80px;
+  padding-inline-end: 10px;
+  color: var(--cds-text-muted);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.rail-card-top:hover .rail-grip,
+.rail-grip:focus-visible {
+  opacity: 1;
+}
+
+.rail-grip:focus-visible {
+  box-shadow: none;
+}
+
+.rail-grip-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--cds-radius);
+}
+
+.rail-grip:focus-visible .rail-grip-box {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.rail-grip-dots {
+  display: grid;
+  grid-template-columns: repeat(2, 2px);
+  gap: 3px;
+  transform: scale(0.75);
+}
+
+.rail-grip-dots > i {
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* While a card is dragged: no text selection, the grabbing hand, and the lifted card on the page
+   colour over the ones it passes (MA bg-page). */
+.rail-scroll[data-dragging],
+.rail-scroll[data-dragging] * {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.rail-card[data-lifted] {
+  background: var(--cds-page-bg);
+}
+
+.rail[data-overlay] .rail-card[data-lifted] {
+  background: var(--cds-surface-1);
+}
+
+.rail-rows {
+  display: contents;
+}
+
+.rail-card-body {
+  display: flex;
+  flex-direction: column;
+  padding-inline: var(--cds-pad-md);
+}
+
+.rail-row {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  width: 100%;
+  min-width: 0;
+  min-height: 26px;
+  padding-inline: var(--cds-pad-xs);
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  text-align: start;
+}
+
+button.rail-row:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+button.rail-row:active {
+  background: var(--cds-alpha-2);
+}
+
+.rail-row .toggle {
+  --switch-h: 13px;
+}
+
+.rail-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--cds-text-secondary);
+}
+
+.rail-server-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  object-fit: contain;
+}
+
+.rail-label,
+.rail-name,
+.rail-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-label {
+  flex: 1;
+}
+
+.rail-meta {
+  flex: none;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-meta[data-warning] {
+  color: var(--cds-text-warning);
+}
+
+/* An SSH host that failed (cf74bc599 lj text-danger). */
+.rail-meta[data-danger] {
+  color: var(--cds-text-danger);
+}
+
+/* 保存 at the environment row's end (cf74bc599 oS: a footnote TextLink in text-muted-control). */
+.rail-save {
+  flex: none;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+/* The folder and branch names open their menus (c227f4d5e Jo / n_), flush with the other labels;
+   the folder's parent gives way first. */
+.rail-name {
+  margin-inline: -4px;
+  padding-inline: 4px;
+  border-radius: var(--cds-radius--xs);
+}
+
+.rail-name:is(:hover, [aria-expanded="true"]) {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.rail-dot {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+.rail-path {
+  flex: 0 9999 auto;
+  color: var(--cds-text-muted);
+}
+
+.rail-more {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 26px;
+  padding-inline: var(--cds-pad-xs);
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-muted);
+  text-align: start;
+}
+
+.rail-more:hover {
+  color: var(--cds-text-primary);
+}
+
+/* 目标 (cf74bc599 CD): px-xs py-1, the goal in body text two lines at most, its state under it
+   in footnote muted; the pencil shows on hover or focus (always on touch screens). */
+.rail-goal {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cds-gap-xs);
+  padding: 4px var(--cds-pad-xs);
+}
+
+.rail-goal-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.rail-goal-objective {
+  color: var(--cds-text-primary);
+}
+
+.rail-goal-objective[data-clamped],
+.rail-goal-meta[data-clamped] {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.rail-goal-meta {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.rail-goal-edit {
+  opacity: 0;
+}
+
+.rail-card:is(:hover, :has(:focus-visible)) .rail-goal-edit {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .rail-goal-edit {
+    opacity: 1;
+  }
+}
+
+/* 上下文 (c2d611398 ke / Me / je, layout "rail"): 已使用 n% in body primary, used / max in
+   footnote muted, the 4px bar under them (gap 4, px-xs, pt 4 / pb 6); the compact row (Ne) in
+   footnote. Folded, the summary is the percentage and a 24×10 meter (c227f4d5e mR). */
+.rail-context {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px var(--cds-pad-xs) 6px;
+}
+
+.rail-context-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+  color: var(--cds-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-context-head > span:first-child:not(:only-child) {
+  flex: none;
+}
+
+.rail-context-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-context-value:not(:only-child) {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.rail-context .usage-bar {
+  border-radius: 999px;
+  background: var(--cds-chart-reference-tint);
+}
+
+/* With the parts read, the bar is Claude's stacked meter (c91b6e9db M, size sm): 4px on the same
+   tint, each part 1px from the last with 1px inner corners and round ends. */
+.rail-stack {
+  position: relative;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--cds-chart-reference-tint);
+}
+
+.rail-stack > span {
+  position: absolute;
+  inset-block: 0;
+  border-radius: 1px;
+}
+
+.rail-stack > span:first-child {
+  border-start-start-radius: 2px;
+  border-end-start-radius: 2px;
+}
+
+.rail-stack > span:last-child {
+  border-start-end-radius: 2px;
+  border-end-end-radius: 2px;
+}
+
+/* The legend (c2d611398 H, layout "rail"; ue; q): groups 6 apart over a 6px foot, rows in
+   footnote with gap-sm and px-xs: a 12px slot for the 10px swatch, the name in secondary, tokens
+   muted, the share in a right-aligned 44px column in primary. A part outside the window, a list's
+   count and its rows are muted. A list's toggle takes the alpha-2 hover; past 12 rows the list
+   scrolls within 240 (292 with 2px round for rows that are buttons, pressScroll). Rows are 24
+   tall like the toggles (c2d611398 X, min-h-6 in the rail). */
+.rail-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 6px;
+}
+
+.rail-legend-group,
+.rail-legend-list,
+.rail-legend-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.rail-legend-rows[data-scroll] {
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.rail-legend-rows[data-scroll][data-press] {
+  max-height: 292px;
+  margin-inline: -2px;
+  padding: 2px;
+  scroll-padding-block: 2px;
+}
+
+.rail-legend-row,
+.rail-legend-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  width: 100%;
+  min-width: 0;
+  min-height: 24px;
+  padding-inline: var(--cds-pad-xs);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-legend-toggle {
+  border-radius: 4px;
+  text-align: start;
+}
+
+.rail-legend-toggle:hover {
+  background: var(--cds-alpha-2);
+}
+
+.rail-legend-lead {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+}
+
+.rail-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.rail-legend-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-legend-tokens {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+.rail-legend-pct {
+  flex: none;
+  width: 44px;
+  color: var(--cds-text-primary);
+  text-align: end;
+}
+
+.rail-legend-row[data-deferred] :is(.rail-legend-name, .rail-legend-pct),
+.rail-legend-toggle .rail-legend-pct,
+.rail-legend-rows .rail-legend-name {
+  color: var(--cds-text-muted);
+}
+
+/* A row that leads somewhere (c2d611398 J / ue / Z, c227f4d5e dB): a ghost button (rounded,
+   ghost-hover fill, alpha-2 while pressed), its name underlined dotted until hovered or focused,
+   then solid, its tokens secondary while hovered, focused or pressed. */
+.rail-legend-press {
+  border-radius: 4px;
+  text-align: start;
+}
+
+.rail-legend-press:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.rail-legend-press:active {
+  background: var(--cds-alpha-2);
+}
+
+.rail-legend-press .rail-legend-name {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.rail-legend-press:is(:hover, :focus-visible) .rail-legend-name {
+  text-decoration-style: solid;
+}
+
+.rail-legend-press:is(:hover, :focus-visible, :active) .rail-legend-tokens {
+  color: var(--cds-text-secondary);
+}
+
+.rail-legend-caret {
+  color: var(--cds-text-muted);
+  transition: transform var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+.rail-legend-toggle[aria-expanded="true"] .rail-legend-caret {
+  transform: rotate(90deg);
+}
+
+/* When the parts were read (mt-pad-xs) and the loading line (min-h-6, the spinner gap-xs off). */
+.rail-context-note {
+  margin-top: var(--cds-pad-xs);
+}
+
+.rail-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-height: 24px;
+}
+
+.rail-compact {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  min-height: 20px;
+  padding: 4px var(--cds-pad-xs);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.rail-compact-hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-note {
+  margin: 0;
+  padding: 0 var(--cds-pad-xs) 4px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.rail-rollup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-meter {
+  display: flex;
+  flex: none;
+  width: 24px;
+  height: 10px;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--cds-alpha-2);
+}
+
+.rail-meter > span {
+  min-width: 6px;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--cds-fill-accent);
+}
+
+.rail-meter > [data-level="warning"] {
+  background: var(--cds-fill-warning);
+}
+
+.rail-meter > [data-level="critical"] {
+  background: var(--cds-fill-danger);
+}
+
+/* 后台任务 (cf74bc599 Ej / Tj): the list takes the focus of a row it loses; a running task keeps
+   pe-xs beside its stop button, which sits flush with the row's end (CDS flush="end": me-outset,
+   the outset half the button's room around its glyph). */
+.rail-tasks {
+  display: flex;
+  flex-direction: column;
+  outline: none;
+}
+
+.rail-task {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding-inline-end: var(--cds-pad-xs);
+}
+
+.rail-task > .btn {
+  margin-inline-end: calc((var(--btn-h) - var(--btn-icon)) / -2);
+}
+
+/* 更改 (c96d752d0 OLe, row layout): the lines added and removed (dS: gap-1, tabular) are a ghost
+   button flush with the row, like the names in 环境. */
+.rail-changes {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The 更改 row's ⋮ shows only while it holds the focus or its menu is open (sr-only
+   focus-within:not-sr-only); a right click on the row opens the same menu. */
+.rail-dots:not(:focus-within, :has([aria-expanded="true"])) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* A pull request (c96d752d0 OLe with a link): px-xs py-1 beside its 20px glyph, the branch as
+   a link (underlined on hover or focus) with the row's ⋮ on a 20px line, and #N with the changes
+   on a footnote line 2px under it. */
+.rail-pr {
+  display: flex;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+  padding: 4px var(--cds-pad-xs);
+}
+
+.rail-pr-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rail-pr-title {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  height: 20px;
+  min-width: 0;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.rail-pr-title > span {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.rail-pr-title a {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-pr-title a:is(:hover, :focus-visible) {
+  outline: none;
+  text-decoration: underline;
+}
+
+.rail-pr-title .btn {
+  margin-block: -2px;
+}
+
+.rail-pr-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 16px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+/* The glyph takes its state's git tint (c96d752d0 xLe over $z). */
+.rail-pr .rail-icon:is([data-look="open"], [data-look="approved"]) {
+  color: var(--cds-text-git-opened);
+}
+
+.rail-pr .rail-icon[data-look="draft"] {
+  color: var(--cds-text-git-draft);
+}
+
+.rail-pr .rail-icon[data-look="merged"] {
+  color: var(--cds-text-git-merged);
+}
+
+.rail-pr .rail-icon:is([data-look="closed"], [data-look="changesRequested"]) {
+  color: var(--cds-text-git-closed);
+}
+
+.rail-pr .rail-icon[data-look="conflicting"] {
+  color: var(--cds-text-git-conflicting);
+}
+
+/* A queued PR (ca6174065 GitMergeQueue) takes the queue's yellow; Codex's font has no queue glyph. */
+.rail-pr .rail-icon[data-look="queued"] {
+  color: var(--cds-fill-warning);
+}
+
+/* gh's problem (ca6174065 Go): a warning glyph before the row's ⋮. */
+.rail-pr-warn {
+  display: flex;
+  flex: none;
+  color: var(--cds-text-warning);
+}
+
+/* Open review threads (cb1afaa4b): a chat glyph and the count, a link to them. */
+.rail-pr-threads {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 合并拉取请求 #N？ with 取消 / 确认合并 (ca6174065 ia group), the footnote line's whole width. */
+.rail-pr-confirm {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-width: 0;
+  color: var(--cds-text-secondary);
+}
+
+.rail-pr-meta .btn-xs {
+  margin-block: -4px;
+}
+
+/* The branch's earlier PRs fold under one toggle (ca6174065 Wi). */
+.rail-pr-history {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The CI popover (ca6174065 Zr / $r): a 220 wide column, 「CI 监控」 over the counts, each row
+   control tall with its glyph, name in primary and count tertiary. */
+.rail-ci-pop {
+  min-width: 220px;
+  padding: var(--cds-pad-sm) 4px;
+}
+
+.rail-ci-head,
+.rail-ci-count {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cds-gap-sm);
+  padding-inline: 8px;
+}
+
+.rail-ci-head {
+  min-height: 20px;
+  padding-block: 3px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.rail-ci-count {
+  min-height: var(--cds-h-control--xs);
+  color: var(--cds-text-primary);
+}
+
+.rail-ci-count > span:first-child {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+}
+
+.rail-ci-count[data-kind="failed"] [data-cds="Icon"] {
+  color: var(--cds-text-danger);
+}
+
+.rail-ci-count[data-kind="passed"] [data-cds="Icon"] {
+  color: var(--cds-text-git-opened);
+}
+
+.rail-ci-count:is([data-kind="pending"], [data-kind="skipped"]) [data-cds="Icon"] {
+  color: var(--cds-text-muted);
+}
+
+.rail-ci-number {
+  color: var(--cds-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-ci-note {
+  margin: 0;
+  padding: 3px 8px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+/* CI (c96d752d0 FLe in the rail): a ghost xs button pulled into the footnote line (-my-1),
+   tabular and muted, the failing count in danger; its 6px dot (tB) is git-opened once all pass,
+   a hollow alpha-5 ring when skipped or unavailable. */
+.rail-ci {
+  margin-block: -4px;
+  color: var(--cds-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-ci[data-status="failed"] {
+  color: var(--cds-text-danger);
+}
+
+.rail-ci-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--cds-alpha-5);
+  border-radius: 999px;
+}
+
+.rail-ci[data-status="passed"] .rail-ci-dot {
+  border: 0;
+  background: var(--cds-text-git-opened);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-card-caret,
+  .rail-legend-caret {
+    transition: none;
+  }
+
+  .rail[data-overlay] > .rail-scroll {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Panes (Panes.tsx; c4db265df Bt, tiles c03935b01 / c9543da06): a column beside the chat with
+   the panes stacked in it. The tiles take shared-18 Tb (the `panels` look behind
+   data-cds-fizzy-lake is unreachable in 2.42304: its allow-list shared-4 Cf is empty): 12px
+   edges between tiles that drag (or take the arrow keys) and 8px in from the window, 9 from the
+   top as the chat column (.main-col), 5 while the titlebar is lifted (shared-20 um: 4 lifted, 8
+   otherwise, under the tiles' 1px border); the chat tile stays transparent and full
+   width (ponytail: the real chat tile also sits 8px in at the sides and bottom, with gutter
+   offsets; not copied). A pane is a "panel" surface (shared-frame ah: rounded-card
+   bg-surface-2 shadow-panel-sm; dark shadow-sm and a 1px alpha-2 outline, shared-6 Ym), a 2rem
+   head (ps / pe 4, gap 6; the title body 13/19 · 400 · secondary · ps 4; actions 2 apart) over
+   its body. */
+
+.pane-column {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  padding: 9px 8px 8px 0;
+  animation: cds-fade-in var(--cds-dur-base) var(--cds-ease-out) both;
+}
+
+.main:not(:has(> .main-col > .chat-header)) > .pane-column {
+  padding-top: 5px;
+}
+
+/* 展开: the pane takes the chat's place too. */
+.main:has(> .pane-column[data-expanded]) > .main-col {
+  display: none;
+}
+
+.pane-column[data-expanded] {
+  padding-left: 8px;
+}
+
+.pane-slot {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.pane {
+  /* Focus gaps, fades and the terminal (c5d464fa3: terminal.background is surface-2) match the card. */
+  --cds-page-bg: var(--cds-surface-2);
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  /* clip, not hidden: a pane is no scroller for a row's scrollIntoView to move (shell.css). */
+  overflow: clip;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-page-bg);
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-sm);
+}
+
+.dark .pane {
+  box-shadow: var(--cds-shadow-sm);
+  outline: 1px solid var(--cds-alpha-2);
+}
+
+@media (forced-colors: active) {
+  .pane {
+    border: 1px solid CanvasText;
+  }
+
+  .dark .pane {
+    outline: none;
+  }
+}
+
+.pane-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex: none;
+  height: 32px;
+  padding: 0 4px;
+}
+
+/* Head controls (c4db265df Bt: shared-6 ph sets no glyph size) take the density's icon. */
+.pane-head .btn {
+  --btn-h: 26px;
+  --btn-r: var(--cds-radius);
+  color: var(--cds-text-secondary);
+}
+
+.pane-head .btn:hover:not(:disabled) {
+  color: var(--cds-text-primary);
+}
+
+.pane-title {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pane-name {
+  min-width: 0;
+  padding-inline-start: 4px;
+  overflow: hidden;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.pane-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.pane-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: clip;
+}
+
+/* An edge (c9543da06 ed, the tiles' gap): transparent, with a 3 × 56 pill in the middle that
+   shows on hover (alpha-3), while dragged (fill-primary) or focused (accent). */
+.pane-edge {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  outline: none;
+  touch-action: none;
+}
+
+.pane-edge::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 999px;
+  background: var(--cds-alpha-3);
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  transition: opacity 120ms ease;
+}
+
+.pane-edge[aria-orientation="vertical"] {
+  width: 12px;
+  cursor: col-resize;
+}
+
+.pane-edge[aria-orientation="vertical"]::before {
+  width: 3px;
+  height: 56px;
+}
+
+.pane-edge[aria-orientation="horizontal"] {
+  height: 12px;
+  cursor: row-resize;
+}
+
+.pane-edge[aria-orientation="horizontal"]::before {
+  width: 56px;
+  height: 3px;
+}
+
+.pane-edge:hover::before {
+  opacity: 1;
+}
+
+.pane-edge[data-active]::before {
+  background: var(--cds-fill-primary);
+  opacity: 1;
+}
+
+.pane-edge:focus-visible::before {
+  background: var(--cds-fill-accent);
+  opacity: 1;
+}
+
+/* Empty state (cc0a875c8): centred, gap 12, padding 12; a 28px muted glyph; the title in body
+   text, the line under it a muted footnote, 36ch at most. */
+.pane-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cds-gap-md);
+  min-height: 0;
+  padding: var(--cds-pad-lg);
+  text-align: center;
+}
+
+.pane-empty-icon {
+  display: flex;
+  color: var(--cds-text-muted);
+}
+
+/* A 24px glyph in a 28px box (cc0a875c8 d: size lg, !size-7). */
+.pane-empty-icon > [data-cds="Icon"] {
+  width: 28px;
+  height: 28px;
+}
+
+.pane-empty-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.pane-empty-title,
+.pane-empty-body {
+  max-width: 36ch;
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.pane-empty-title {
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.pane-empty-body {
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 15px;
+}
+
+.pane-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+}
+
+/* The folder picker's empty line (Dialogs.tsx). */
+.side-empty {
+  display: grid;
+  place-items: center;
+  padding: 32px 0;
+  color: var(--cds-text-muted);
+  font-size: 13px;
+}
+
+/* A context menu opens at the pointer. */
+.pane-menu-anchor {
+  position: fixed;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* Tabs in a pane head (cfe7c4b3b compact preset R): pills 24 tall · basis 192 · 4 apart · p 2;
+   the name and its muted description stop at 140; the 20px close box (r 4) shows on hover or
+   on the selected tab. A file tab is at least 104 wide; a preview file tab is italic. */
+.pane-strip {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 100%;
+}
+
+/* 新建终端 follows the tabs at the tab's own size (cfe7c4b3b R leadBox 1.25rem). */
+.pane-strip > .btn {
+  --btn-h: 20px;
+  --btn-icon: 16px;
+  --btn-icon-wght: 533.3;
+}
+
+.pane-tabs {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  mask-image: linear-gradient(to right, #000 calc(100% - 8px), transparent 100%);
+}
+
+.pane-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.pane-tab {
+  display: flex;
+  flex: 0 1 192px;
+  align-items: center;
+  gap: 2px;
+  min-width: 24px;
+  height: 24px;
+  padding: 2px;
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-secondary);
+}
+
+.pane-tab[data-file] {
+  min-width: 104px;
+}
+
+.pane-tab:hover {
+  background: var(--cds-fill-ghost-hover);
+  color: var(--cds-text-primary);
+}
+
+.pane-tab[data-selected] {
+  background: var(--cds-fill-ghost-selected);
+  color: var(--cds-text-primary);
+}
+
+.pane-tab-label {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  height: 100%;
+  padding-inline: 6px 2px;
+  border-radius: calc(var(--cds-radius) - 2px);
+  color: inherit;
+  font-size: 13px;
+  line-height: 19px;
+  text-align: start;
+}
+
+.pane-tab-label:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.pane-tab-text {
+  min-width: 0;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-tab-text[data-preview] {
+  font-style: italic;
+}
+
+.pane-tab-desc {
+  margin-inline-start: 6px;
+  color: var(--cds-text-muted);
+}
+
+.pane-tab-close {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--cds-text-muted);
+  opacity: 0;
+}
+
+.pane-tab:is(:hover, [data-selected], :focus-within) .pane-tab-close {
+  opacity: 1;
+}
+
+.pane-tab-close:hover {
+  background: var(--cds-fill-ghost-hover);
+  color: var(--cds-text-primary);
+}
+
+.pane-tab-input {
+  width: 140px;
+  min-width: 0;
+  height: 20px;
+  margin-inline-start: 4px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: calc(var(--cds-radius) - 2px);
+  background: var(--cds-fill-field, var(--cds-page-bg));
+  box-shadow: var(--cds-focus-shadow);
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  outline: none;
+}
+
+/* 转到文件 (cccc2cf0a Fb): 22rem wide, the search field over the rows; a row is the name, its
+   folder in muted text and the +/− counts. */
+.goto-menu {
+  width: 22rem;
+  max-width: calc(100vw - 16px);
+}
+
+.goto-input {
+  width: 100%;
+  height: 28px;
+  margin-bottom: 4px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--cds-radius);
+  background: var(--cds-fill-field);
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.goto-input:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.goto-name {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.goto-dir {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 更改 (cccc2cf0a qO diff branch, c44d00c7f Al): 显示文件 and the scope (`sha → 工作树` in
+   secondary ink) lead the head; the body is the file list (dragged 140–480) beside the files,
+   under the footnote row `N 个文件 +A −D` (py 8, right). */
+.diff-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.pane-head .diff-scope.btn {
+  --btn-px: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.diff-scope-range {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) auto minmax(0, max-content);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.diff-scope-range > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diff-scope-range > [data-cds="Icon"] {
+  color: var(--cds-text-muted);
+}
+
+.diff-pane-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.diff-files {
+  flex: none;
+  min-width: 0;
+  padding: 4px;
+  overflow-y: auto;
+}
+
+.diff-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 26px;
+  padding: 0 6px;
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+  text-align: start;
+}
+
+.diff-file:hover,
+.diff-file[aria-current] {
+  background: var(--cds-fill-ghost-hover);
+  color: var(--cds-text-primary);
+}
+
+.diff-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-pane-files {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 12px 24px;
+  overflow-y: auto;
+}
+
+.diff-pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex: none;
+  padding: 8px 0 0;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 15px;
+}
+
+.diff-pane-note {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+/* 自动换行 (on by default): long lines wrap instead of scrolling sideways. */
+.diff-pane[data-wrap] .diff-row {
+  min-width: 0;
+}
+
+.diff-pane[data-wrap] .diff-code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 并排显示 (c44d00c7f, unified by default): removed | added, each with its number column. */
+.diff-sbs .diff-row {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  min-width: 0;
+}
+
+.diff-cell {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  min-width: 0;
+}
+
+.diff-cell + .diff-cell {
+  box-shadow: inset 1px 0 0 var(--cds-border);
+}
+
+.diff-cell .diff-code {
+  overflow: hidden;
+}
+
+.diff-cell[data-kind="add"] {
+  background: var(--cds-diff-add);
+}
+
+.diff-cell[data-kind="del"] {
+  background: var(--cds-diff-del);
+}
+
+.diff-cell[data-kind="add"] .diff-sign {
+  color: var(--cds-diff-add-text);
+}
+
+.diff-cell[data-kind="del"] .diff-sign {
+  color: var(--cds-diff-del-text);
+}
+
+/* 计划 (cccc2cf0a Mv / Nv): the page scrolls with 12 around and a 68ch column; Codex's plan in
+   prose, then 任务 (12 above, 5 under its heading) over the task rows (cb6930dae Lu: 6 apart,
+   py 6; a 16px status cell, 4 to the text; done steps struck through in secondary ink, their
+   check primary: ua without mutedDone). */
+.plan-page {
+  flex: 1;
+  min-height: 0;
+  padding: var(--cds-pad-lg);
+  overflow-y: auto;
+  scrollbar-gutter: stable both-edges;
+  user-select: text;
+}
+
+.plan-col {
+  max-width: 68ch;
+  margin: 0 auto;
+}
+
+/* cccc2cf0a kb: what selecting does, a caption line over the plan. */
+.plan-comment-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: var(--chat-item-gap, 10px);
+  color: var(--muted-as-secondary, var(--cds-text-muted));
+  font-size: var(--cds-font-size-caption);
+}
+
+/* cccc2cf0a Db: commented text, underlined in accent over an accent wash (20% under the pointer). */
+.plan-doc mark[data-plan-comment-id] {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--cds-fill-accent) 10%, transparent);
+  color: inherit;
+  text-decoration: underline 2px var(--cds-fill-accent);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.plan-doc mark[data-plan-comment-id][data-hovered] {
+  background: color-mix(in srgb, var(--cds-fill-accent) 20%, transparent);
+}
+
+.plan-doc mark[data-plan-comment-id]:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-focus-shadow);
+}
+
+::highlight(plan-selection) {
+  background-color: Highlight;
+  color: HighlightText;
+}
+
+/* c96d752d0 Tot: the floating comment box, 320 wide (c82eca2bd je floating: px-lg py-2.5,
+   the field and its keys on one row, the keys at its foot). */
+.popover.plan-comment-box {
+  top: 0;
+  left: 0;
+  width: 320px;
+  max-width: none;
+  padding: 10px var(--cds-pad-lg);
+  outline: none;
+  will-change: transform;
+}
+
+.plan-comment-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.plan-comment-input {
+  flex: 1;
+  min-width: 0;
+  max-height: 8lh;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: var(--cds-font-size-body);
+  field-sizing: content;
+  resize: none;
+  outline: none;
+}
+
+.plan-comment-input::placeholder {
+  color: var(--cds-text-muted);
+}
+
+/* The global :focus-visible ring is not this field's (c82eca2bd q: hide-focus-ring). */
+.plan-comment-input:focus-visible {
+  box-shadow: none;
+}
+
+.plan-comment-actions {
+  display: flex;
+  align-items: center;
+  align-self: flex-end;
+  gap: 3px;
+  flex-shrink: 0;
+  height: 24px;
+}
+
+.plan-comment-key {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: var(--cds-radius-sm, 4px);
+  color: var(--muted-as-secondary, var(--cds-text-muted));
+}
+
+.plan-comment-key:hover {
+  background: var(--cds-fill-ghost-hover, var(--cds-alpha-1));
+  color: var(--cds-text-primary);
+}
+
+.plan-comment-key:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.plan-comment-delete:hover {
+  color: var(--cds-text-danger);
+}
+
+.plan-h2 {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.plan-tasks {
+  margin-top: var(--cds-pad-lg);
+}
+
+.plan-col > .plan-tasks:first-child {
+  margin-top: 0;
+}
+
+.plan-tasks > .plan-h2 {
+  margin-bottom: 5px;
+}
+
+.plan-todos {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 0;
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  line-height: 19px;
+  list-style: none;
+}
+
+.plan-todo {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.plan-todo[data-status="completed"] {
+  color: var(--cds-text-secondary);
+  text-decoration: line-through 1px;
+}
+
+.plan-todo-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 1lh;
+  color: var(--cds-text-primary);
+}
+
+.plan-todo[data-status="pending"] .plan-todo-icon {
+  color: var(--cds-text-muted);
+}
+
+/* The step is epitaxy markdown (transcript.css .markdown.epitaxy); its code chips keep primary
+   ink on done steps too. */
+.plan-todo-text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Codex's goal heads the plan: the objective in two lines (显示更多 opens it), then a muted
+   footnote of status, tokens and time; its keys sit on the right of the heading. */
+.plan-goal {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: var(--cds-pad-lg);
+  padding-bottom: var(--cds-pad-lg);
+  box-shadow: inset 0 -1px 0 var(--cds-border);
+}
+
+.plan-goal-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.plan-goal-head .btn {
+  color: var(--cds-text-secondary);
+}
+
+.plan-goal-text {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+
+.plan-goal-text[data-clamped] {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.plan-goal-more {
+  align-self: flex-start;
+  font-size: 12px;
+}
+
+.plan-goal-meta {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Claude's session-presets task rows: single-line titles, family leaves and bounded output. */
+.bg-page {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  padding: 10px;
+  overflow-y: auto;
+  scrollbar-gutter: stable both-edges;
+}
+
+.bg-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bg-heading {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 15px;
+  font-weight: 400;
+  font-variation-settings: var(--cds-font-wght-regular);
+}
+
+.bg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bg-task {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-bottom: 1px solid var(--cds-border);
+}
+
+.bg-task:is(:hover, :focus-within) {
+  background: var(--cds-alpha-1);
+}
+
+.bg-task-main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-block: 7px;
+}
+
+.bg-task-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bg-task-toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  line-height: 19px;
+  text-align: start;
+  outline: none;
+}
+
+/* Keep the keyboard focus ring around the row without blocking title tooltips. */
+.bg-task-toggle::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+}
+
+.bg-task-toggle:focus-visible::after {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.bg-task-row .btn {
+  position: relative;
+  z-index: 1;
+}
+
+.bg-task-title {
+  min-width: 0;
+  flex: 1;
+}
+
+.bg-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bg-task-duration,
+.bg-task-state,
+.bg-task-model,
+.bg-family-toggle {
+  flex: none;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+}
+
+.bg-task-state[data-tone="danger"] {
+  color: var(--cds-text-danger);
+}
+
+@container (width < 300px) {
+  .bg-task-duration { display: none; }
+}
+
+/* A sub-agent's record (cccc2cf0a aF / PP): 返回 and its name in the head; the transcript's own
+   rows in the pane's width, with no 48px foot under them. */
+.agent-record-title {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agent-record-title .pane-name {
+  padding-inline-start: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-record {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Over .transcript-list's own padding (its --transcript-overlay is the chat's, unset here). */
+.agent-record .agent-record-list {
+  padding: 12px 16px 24px;
+}
+
+.agent-record-model,
+.agent-record-end {
+  margin: 8px 0 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.agent-record-model span {
+  color: var(--cds-text-secondary);
+}
+
+.agent-record-live {
+  display: block;
+  margin-top: 12px;
+}
+
+.bg-detail-toggle,
+.bg-finished,
+.bg-family-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.bg-family-toggle {
+  padding: 5px 0;
+}
+
+.bg-finished[aria-expanded="true"] > [data-cds="Icon"],
+.bg-detail-toggle[aria-expanded="true"] > [data-cds="Icon"],
+.bg-family-toggle[aria-expanded="true"] > [data-cds="Icon"] {
+  rotate: 90deg;
+}
+
+.bg-children {
+  min-width: 0;
+  padding-inline-start: 16px;
+  border-inline-start: 1px solid var(--cds-border);
+}
+
+.bg-task-caret {
+  flex: none;
+  height: 19px;
+  color: var(--cds-text-muted);
+  opacity: 0;
+  transition: rotate var(--cds-dur-fast) ease-out;
+}
+
+.bg-task:is(:hover, :focus-within) .bg-task-caret {
+  opacity: 1;
+}
+
+.bg-task-toggle[aria-expanded="true"] .bg-task-caret {
+  rotate: 90deg;
+}
+
+.bg-task-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 0 0 10px;
+  user-select: text;
+}
+
+.bg-task-code {
+  max-height: 200px;
+  margin: 0;
+  padding: 5px 8px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: var(--cds-alpha-2);
+  color: var(--cds-text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--cds-font-size-code);
+  line-height: var(--cds-leading-code);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.bg-task-code:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.bg-task-note {
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 15px;
+}
+
+/* ---------------------------------------------------------------------------
+   Terminal pane (U23; c6bf19e8f): the tabs sit in the pane head (see .pane-tab); xterm fills
+   the body with 8 above, below and before it (c6bf19e8f 3577-3594) and draws its own block
+   cursor. A shell that exited shows 「Shell 已退出」 over it on surface-1. */
+
+.term-body {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Terminal.tsx themeFor paints it in the code theme's terminal background once a shell shows, as
+   c6bf19e8f paints xterm's container (backgroundColor: R.background). */
+.term-host {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px 0 8px 8px;
+  background: var(--cds-page-bg);
+  color: var(--cds-text-primary);
+  font-family: var(--font-mono);
+}
+
+/* xterm's root also carries the class `terminal`, which transcript.css styles as a command
+   output block: undo that here. */
+.term-host .xterm {
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  line-height: normal;
+  white-space: normal;
+  overflow-wrap: normal;
+}
+
+/* xterm.css paints the viewport black; the cells left over after fitting show the page. */
+.term-host .xterm .xterm-viewport {
+  background-color: transparent;
+  scrollbar-width: thin;
+}
+
+.term-exited {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  background: var(--cds-surface-1);
+}
+
+/* ---------------------------------------------------------------------------
+   Files pane (U24; cccc2cf0a kC, c3fde7009 document preview): the open files as tabs in the
+   pane head, then the document or the code. */
+
+.file-loading {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+}
+
+/* PDF (ca2ef848d j4): h-full w-full border-none bg-surface-3. */
+.file-pdf {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: none;
+  background: var(--cds-surface-3);
+}
+
+/* Code: 12/17 mono with line numbers; colors and surface as the code fence (the code theme, as the
+   editor's cbd02b8f2 ra() takes its background). */
+.file-code {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-block: 4px 24px;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+/* Too big to format (c3fde7009 2790): the plain text under a muted footnote. */
+.file-note {
+  margin: 0;
+  padding: 4px 12px 8px;
+  color: var(--cds-text-muted);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 15px;
+}
+
+.file-pre {
+  margin: 0;
+  font: inherit;
+}
+
+.file-line {
+  display: flex;
+  min-width: max-content;
+  padding-inline-end: 16px;
+}
+
+.file-ln {
+  flex: none;
+  min-width: 3.5em;
+  padding-inline: 8px 12px;
+  color: var(--cds-text-disabled);
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.file-line > code {
+  font: inherit;
+  white-space: pre;
+}
+
+/* 自动换行 from the pane's menu (off by default). */
+.file-code[data-wrap] .file-line {
+  min-width: 0;
+}
+
+.file-code[data-wrap] .file-line > code {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* A jump to a line: code-reply-flash, 1.2s (a still tint when motion is reduced). */
+.file-line[data-flash] {
+  animation: code-reply-flash 1.2s ease-out;
+}
+
+:root[data-reduce-motion="true"] .file-line[data-flash] {
+  animation: none;
+  background: var(--cds-alpha-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .file-line[data-flash] {
+    animation: none;
+    background: var(--cds-alpha-2);
+  }
+}
+
+/* Document page (c3fde7009 .epitaxy-document-page / -column / -prose): body 15px (text size
+   s 14 / l 16), measure 36 bodies, padding clamp(1.25rem, 6cqi, 4rem) across and
+   clamp(2rem, 6cqi, 3.5rem) / 6rem down, leading 1.6; h1 1.75em / 1.15 · 500 · -0.012em, h2
+   1.35em / 1.25 · 500, h3 1.125em · 600, h4 1em · 600; a heading right after a heading 0.9em. */
+.doc-page {
+  --document-body: 15px;
+  --document-measure: calc(var(--document-body) * 36);
+  --document-rail-min-gutter: 4.75rem;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  container-type: size;
+}
+
+:root[data-chat-text-size="s"] .doc-page {
+  --document-body: 14px;
+}
+
+:root[data-chat-text-size="l"] .doc-page {
+  --document-body: 16px;
+}
+
+.doc-column {
+  --document-pad: clamp(1.25rem, 6cqi, 4rem);
+  --document-gutter: calc(50cqi - min(var(--document-measure) / 2, 50cqi - var(--document-pad)));
+  box-sizing: content-box;
+  max-width: var(--document-measure);
+  margin-inline: auto;
+  padding-inline: var(--document-pad);
+  padding-block: clamp(2rem, 6cqi, 3.5rem) 6rem;
+  color: var(--cds-text-primary);
+  font-size: var(--document-body);
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+
+.doc-chunk + .doc-chunk {
+  margin-block-start: 0.75em;
+}
+
+.doc-chunk + .doc-chunk:has(> .markdown > :is(h1, h2, h3, h4):first-child) {
+  margin-block-start: 1.75em;
+}
+
+.doc-chunk:has(> .markdown > :is(h1, h2, h3, h4, h5):only-child) + .doc-chunk:has(> .markdown > :is(h1, h2, h3, h4, h5, h6):first-child) {
+  margin-block-start: 0.9em;
+}
+
+.doc-column .markdown h1 {
+  font-size: 1.75em;
+  line-height: 1.15;
+  font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
+  letter-spacing: -0.012em;
+}
+
+.doc-column .markdown h2 {
+  font-size: 1.35em;
+  line-height: 1.25;
+  font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.doc-column .markdown h3 {
+  font-size: 1.125em;
+  font-weight: 600;
+  font-variation-settings: var(--cds-font-wght-semibold);
+}
+
+.doc-column .markdown h4 {
+  font-size: 1em;
+  font-weight: 600;
+  font-variation-settings: var(--cds-font-wght-semibold);
+}
+
+/* Inline code (c3fde7009 .epitaxy-document-prose): prose's chip in primary ink (the page sets
+   --cds-prose-code-color), 4px corners, .12em / .36em padding, cloned across line breaks. */
+.doc-column .markdown :not(pre) > code {
+  padding: 0.12em 0.36em;
+  border-radius: 4px;
+  color: var(--cds-text-primary);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/* Pane prose (Markdown 阅读版式 off, __gb__1590565993: cd2efac6e Zf unmeasured, c3fde7009 Ua at
+   typography epitaxy): the scroller pads p-lg round a column up to 860px; each block is a
+   c19e90103 .epitaxy-markdown.epitaxy-file-prose-chunk at the body size, 16px apart; h1 22/28
+   (28 above), h2 17/22 (24 / 8), h3 15 (20 / 6), h4–h6 semibold (16 / 4), and a chunk a heading
+   ends keeps that heading's gap below. */
+.file-prose-pane {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  contain: strict;
+  scrollbar-gutter: stable both-edges;
+  padding: var(--cds-pad-lg);
+  color: var(--cds-text-primary);
+}
+
+.file-prose-column {
+  max-width: 860px;
+  margin-inline: auto;
+}
+
+.file-prose-chunk {
+  margin-block-end: 16px;
+}
+
+.file-prose-chunk:last-child {
+  margin-block-end: 0;
+}
+
+.file-prose-chunk:not(:last-child):has(> .markdown > h2:last-child) {
+  margin-block-end: 8px;
+}
+
+.file-prose-chunk:not(:last-child):has(> .markdown > h3:last-child) {
+  margin-block-end: 6px;
+}
+
+.file-prose-chunk:not(:last-child):has(> .markdown > :is(h4, h5, h6):last-child) {
+  margin-block-end: 4px;
+}
+
+.file-prose-chunk + .file-prose-chunk:has(> .markdown > h1:first-child) {
+  margin-block-start: 28px;
+}
+
+.file-prose-chunk + .file-prose-chunk:has(> .markdown > h2:first-child) {
+  margin-block-start: 24px;
+}
+
+.file-prose-chunk + .file-prose-chunk:has(> .markdown > h3:first-child) {
+  margin-block-start: 20px;
+}
+
+.file-prose-chunk + .file-prose-chunk:has(> .markdown > :is(h4, h5, h6, hr):first-child) {
+  margin-block-start: 16px;
+}
+
+.markdown.epitaxy.file-prose {
+  --chat-item-gap: 16px;
+  display: block;
+}
+
+.markdown.epitaxy.file-prose > * {
+  margin-block-end: var(--chat-item-gap);
+}
+
+.markdown.epitaxy.file-prose > :last-child {
+  margin-block-end: 0;
+}
+
+.markdown.epitaxy.file-prose h1 {
+  margin-block-end: 16px;
+  font-size: 22px;
+  line-height: 28px;
+}
+
+.markdown.epitaxy.file-prose h1:not(:first-child) {
+  margin-block-start: 28px;
+}
+
+.markdown.epitaxy.file-prose h2 {
+  margin-block: 24px 8px;
+  color: var(--cds-text-primary);
+  font-size: 17px;
+  line-height: 22px;
+}
+
+.markdown.epitaxy.file-prose h3 {
+  margin-block: 20px 6px;
+  font-size: 15px;
+}
+
+.markdown.epitaxy.file-prose :is(h4, h5, h6) {
+  margin-block: 16px 4px;
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+}
+
+.markdown.epitaxy.file-prose > :is(h1, h2, h3, h4, h5, h6):first-child {
+  margin-block-start: 0;
+}
+
+/* A jump target lands with epitaxy-document-landed (accent tint, 1.6s; motion allowed only). */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduce-motion="true"]) .doc-column [data-landed] {
+    border-radius: 0.1875rem;
+    animation: epitaxy-document-landed 1.6s ease-out;
+  }
+}
+
+/* Rewritten parts (c3fde7009 [data-changed]): an accent tint behind the block, in by 15%,
+   held to 45%, out by 1.6s; the a / b stamps restart it. */
+:is(.doc-chunk, .file-line)[data-changed] {
+  position: relative;
+  isolation: isolate;
+}
+
+:is(.doc-chunk, .file-line)[data-changed]::after {
+  content: "";
+  position: absolute;
+  inset: -0.1875rem;
+  z-index: -1;
+  border-radius: 0.1875rem;
+  background-color: var(--cds-bg-accent);
+  opacity: 0;
+  pointer-events: none;
+  animation: epitaxy-document-changed-a 1.6s var(--cds-ease-out);
+}
+
+:is(.doc-chunk, .file-line)[data-changed="b"]::after {
+  animation-name: epitaxy-document-changed-b;
+}
+
+/* Rail ticks (c3fde7009 .epitaxy-document-rail*): sticky in the left gutter, 1.25rem in; the
+   ticks take room only when the gutter is 4.75rem or more. 18 x 2 bars at .777778 (headings
+   one / two levels down .5 / .333333, nudged 3 / 6px); read muted, current accent at 1 x 1.5.
+   Only the ticks and the open outline take the pointer. */
+.doc-rail {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  width: 0;
+  height: 0;
+  margin-inline-start: calc(1.25rem - var(--document-gutter));
+}
+
+.doc-rail-nav {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0.75rem;
+  width: 3rem;
+  height: min(100cqb - 1.5rem - clamp(2rem, 6cqi, 3.5rem), 100dvh - 3rem);
+  font-family: var(--font-sans);
+  pointer-events: none;
+  animation: epitaxy-document-rail-in 0.18s ease-out 0.12s both;
+}
+
+.doc-rail-nav > nav {
+  position: relative;
+  height: 100%;
+}
+
+.doc-rail-nav .sr-only > button {
+  pointer-events: auto;
+}
+
+.doc-rail-ticks {
+  --document-rail-room: calc((var(--document-gutter) - var(--document-rail-min-gutter)) * 9999);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: clamp(0px, var(--document-rail-room), 2rem);
+  max-height: 100%;
+  margin: 0;
+  padding-block: 0.375rem;
+  padding-inline: clamp(0px, var(--document-rail-room), 6px) 0;
+  overflow: hidden;
+  list-style: none;
+  pointer-events: auto;
+}
+
+.doc-rail-ticks > li {
+  display: flex;
+  flex: 0 0 var(--document-rail-tick);
+  align-items: center;
+}
+
+.doc-rail-ticks > li > span {
+  display: block;
+  width: 18px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--cds-text-disabled);
+  transform-origin: 0;
+  scale: 0.777778 1;
+}
+
+.doc-rail-ticks > li[data-read] > span {
+  background: var(--cds-text-muted);
+}
+
+.doc-rail-ticks > li[data-level="1"] > span {
+  translate: 3px;
+  scale: 0.5 1;
+}
+
+.doc-rail-ticks > li[data-level="2"] > span {
+  translate: 6px;
+  scale: 0.333333 1;
+}
+
+.doc-rail-ticks > li[data-current] > span {
+  background: var(--cds-text-accent);
+  translate: 0;
+  scale: 1 1.5;
+}
+
+/* Outline (c3fde7009 .epitaxy-document-outline): a popover-surface list over the ticks, rows
+   1.375rem tall (r6, px 6 / 8, gap 8, body / footnote leading, secondary ink; the current one
+   primary 500), each led by its tick. */
+.doc-outline {
+  position: absolute;
+  top: 0;
+  inset-inline-start: -4px;
+  isolation: isolate;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: clamp(min(15rem, calc(100cqi - 2.5rem)), calc(var(--document-gutter) - 1rem), 17rem);
+  max-height: 100%;
+  padding: calc(0.375rem - 1px) 4px;
+  border-radius: 0.5rem;
+  background: var(--cds-surface-popover);
+  box-shadow: var(--cds-shadow-menu);
+  transition:
+    opacity 0.15s ease-out,
+    visibility 0.15s;
+}
+
+.doc-outline:not([data-open]) {
+  visibility: hidden;
+  opacity: 0;
+}
+
+.doc-outline[data-open] {
+  pointer-events: auto;
+}
+
+.doc-outline > ol {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  list-style: none;
+}
+
+.doc-outline li > button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 1.375rem;
+  padding-inline: 6px 8px;
+  border-radius: 6px;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 16px;
+  text-align: start;
+}
+
+.doc-outline li[data-current] > button {
+  color: var(--cds-text-primary);
+  font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.doc-outline li > button:hover {
+  background: var(--cds-fill-ghost-hover);
+  color: var(--cds-text-primary);
+}
+
+.doc-outline li > button:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.doc-outline-tick {
+  display: flex;
+  flex: none;
+  align-items: center;
+  width: 18px;
+}
+
+.doc-outline-tick::before {
+  content: "";
+  display: block;
+  width: 14px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--cds-text-disabled);
+}
+
+.doc-outline li[data-read] .doc-outline-tick::before {
+  background: var(--cds-text-muted);
+}
+
+.doc-outline li[data-level="1"] .doc-outline-tick::before {
+  width: 9px;
+  margin-inline-start: 3px;
+}
+
+.doc-outline li[data-level="2"] .doc-outline-tick::before {
+  width: 6px;
+  margin-inline-start: 6px;
+}
+
+.doc-outline li[data-current] .doc-outline-tick::before {
+  width: 18px;
+  height: 3px;
+  margin-inline-start: 0;
+  background: var(--cds-text-accent);
+}
+
+.doc-outline-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-outline li[data-level="1"] .doc-outline-text {
+  padding-inline-start: 0.625rem;
+}
+
+.doc-outline li[data-level="2"] .doc-outline-text {
+  padding-inline-start: 1.25rem;
+}
+
+:root[data-reduce-motion="true"] .doc-rail-nav {
+  animation: none;
+}
+
+:root[data-reduce-motion="true"] .doc-outline {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .doc-rail-nav {
+    animation: none;
+  }
+
+  .doc-outline {
+    transition: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Keyframes used only here (original names). */
+
+@keyframes epitaxy-document-landed {
+  0% {
+    background-color: var(--cds-bg-accent);
+  }
+  to {
+    background-color: #0000;
+  }
+}
+
+@keyframes epitaxy-document-changed-a {
+  0% {
+    opacity: 0;
+  }
+  15%,
+  45% {
+    opacity: 1;
+  }
+}
+
+@keyframes epitaxy-document-changed-b {
+  0% {
+    opacity: 0;
+  }
+  15%,
+  45% {
+    opacity: 1;
+  }
+}
+
+@keyframes epitaxy-document-rail-in {
+  0% {
+    opacity: 0;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Narrow screens: the panes overlay the chat from the right. */
+
+@media (max-width: 860px) {
+  /* Over the session column only (.main is the containing block), never over the sidebar. */
+  .pane-column {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: var(--z-modal);
+    width: min(100%, 560px);
+    padding-left: 8px;
+  }
+
+  .pane {
+    box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-lg);
+  }
+
+  .dark .pane {
+    box-shadow: var(--cds-shadow-lg);
+  }
+
+  .pane-edge[aria-orientation="vertical"] {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   插件 page (Plugins.tsx): the Codex app's /plugins in Claude's customize parts. The page column
+   scrolls under the titlebar; cards sit in Claude's discover grid (shared-19: auto-fill columns of
+   at least 340, gap-x 40, no row gap) as yours-row rows (c27f32a39: p-md, gap-md, rounded-card,
+   ghost hover, a hairline between rows). */
+
+.plugins-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.plugins-page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 32px 64px;
+}
+
+@container tile-slot (max-width: 560px) {
+  .plugins-page {
+    padding-inline: 16px;
+  }
+}
+
+.plugins-crumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.plugins-crumb {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cds-text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.plugins-crumb:hover {
+  color: var(--cds-text-primary);
+}
+
+.plugins-crumb-sep {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+.plugins-intro {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 20px;
+}
+
+.plugins-title {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-family: var(--font-voice);
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  letter-spacing: -0.025em;
+}
+
+.plugins-subtitle {
+  margin: 0;
+  color: var(--cds-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* The search field: the .input look on the box, the text input inside it bare. */
+.plugins-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  margin-bottom: 20px;
+  padding-inline: 12px;
+  border-radius: var(--cds-radius);
+  background: var(--cds-fill-field);
+  box-shadow: inset 0 0 0 1px var(--cds-fill-field-ring);
+  color: var(--cds-text-muted);
+  transition: box-shadow var(--cds-dur-fast) ease-out;
+}
+
+.plugins-search:focus-within {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.plugins-search-input,
+.plugins-search-input:focus-visible {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  outline: none;
+}
+
+.plugins-search-input::placeholder {
+  color: var(--cds-text-muted);
+}
+
+/* 已安装: 44px icons that lift on hover, 另有 N 个, 管理 at the end. */
+.plugins-shelf {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.plugins-shelf-label {
+  flex: none;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+}
+
+.plugins-shelf-icons {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-block: 4px;
+  overflow: hidden;
+}
+
+.plugins-shelf-icon {
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: none;
+  cursor: pointer;
+  transition: transform var(--cds-dur-fast) ease-out;
+}
+
+.plugins-shelf-icon:hover {
+  transform: translateY(-2px);
+}
+
+.plugins-shelf-icon .plugins-logo {
+  border-radius: 12px;
+}
+
+.plugins-shelf-more {
+  flex: none;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--cds-text-secondary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.plugins-shelf-more:hover {
+  color: var(--cds-text-primary);
+}
+
+.plugins-tabs {
+  margin-bottom: 24px;
+}
+
+.plugins-section {
+  margin-bottom: 32px;
+}
+
+.plugins-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+  color: var(--cds-text-primary);
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+}
+
+.plugins-section-name {
+  flex: none;
+}
+
+.plugins-section-link {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.plugins-section-link [data-cds="Icon"] {
+  color: var(--cds-text-muted);
+  transition: transform var(--cds-dur-fast) ease-out;
+}
+
+.plugins-section-link:hover [data-cds="Icon"] {
+  transform: translateX(2px);
+}
+
+.plugins-section-detail {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-muted);
+  font-family: var(--cds-font-mono);
+  font-size: 12px;
+  font-weight: normal;
+  font-variation-settings: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plugins-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
+  column-gap: 40px;
+  margin-inline: -12px;
+}
+
+.plugins-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border-radius: var(--cds-radius-card);
+}
+
+.plugins-card::after {
+  content: "";
+  position: absolute;
+  inset: auto 12px 0;
+  height: 1px;
+  background: var(--cds-alpha-1);
+}
+
+.plugins-card:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.plugins-card:hover::after {
+  visibility: hidden;
+}
+
+.plugins-card[data-dim] > :not(.plugins-card-hit, .plugins-card-action) {
+  opacity: 0.6;
+}
+
+/* The whole row opens the plugin; the action stays its own button above it. */
+.plugins-card-hit {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  cursor: pointer;
+}
+
+.plugins-card-hit:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.plugins-card-text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+  pointer-events: none;
+}
+
+.plugins-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--cds-text-primary);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.plugins-card-desc {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 18px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.plugins-card-action {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+}
+
+.plugins-card-state {
+  display: inline-flex;
+  color: var(--cds-text-muted);
+}
+
+.plugins-logo {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--cds-radius-card);
+  box-shadow: inset 0 0 0 0.5px var(--cds-border);
+  background: var(--cds-surface-1);
+  color: var(--cds-text-secondary);
+  pointer-events: none;
+}
+
+.plugins-card-skeleton .plugins-logo {
+  width: 36px;
+  height: 36px;
+  background: var(--cds-alpha-1);
+}
+
+.plugins-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.plugins-empty {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 48px 16px;
+  text-align: center;
+}
+
+.plugins-empty-title {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: 15px;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.plugins-note {
+  margin: 0;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+/* Detail (plugin-detail-view; the c24c8737b header): 48px logo, the title, actions at the end. */
+.plugins-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.plugins-hero-text {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+}
+
+.plugins-hero-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-family: var(--font-voice);
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  letter-spacing: -0.025em;
+}
+
+.plugins-hero-title .badge {
+  font-family: var(--cds-font-sans);
+  letter-spacing: normal;
+}
+
+.plugins-hero-sub {
+  margin: 0;
+  color: var(--cds-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.plugins-hero-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+@container tile-slot (max-width: 560px) {
+  .plugins-hero {
+    flex-wrap: wrap;
+  }
+}
+
+.plugins-prompts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.plugins-prompt {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  border: 0;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.plugins-prompt:hover:not(:disabled) {
+  background: var(--cds-alpha-2);
+}
+
+.plugins-prompt [data-cds="Icon"] {
+  flex: none;
+  margin-top: 1px;
+  color: var(--cds-text-muted);
+}
+
+.plugins-description {
+  margin-bottom: 32px;
+}
+
+.plugins-description-body[data-clamped] {
+  max-height: 160px;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 60%, transparent);
+}
+
+.plugins-more {
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cds-text-secondary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.plugins-more:hover {
+  color: var(--cds-text-primary);
+}
+
+.plugins-info-value {
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  text-align: end;
+}
+
+.plugins-info-value a {
+  color: inherit;
+}
+
+/* Install interstitial (plugin-install-modal details). */
+.plugins-install {
+  display: grid;
+  gap: 16px;
+}
+
+.plugins-install-head {
+  margin: 0 0 4px;
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+}
+
+.plugins-install-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.plugins-install-label {
+  margin-inline-end: 8px;
+  color: var(--cds-text-primary);
+}
+
+.plugins-form {
+  display: grid;
+  gap: 12px;
+}
+
+.plugins-field {
+  display: grid;
+  gap: 4px;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+}
+
+/* 自动修复 under the CI counts: a row with its switch, then what it does. */
+.rail-ci-fix {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--cds-border);
+}
+
+/* ---------------------------------------------------------------------------
+   自定义 page (Customize.tsx; Claude's customize-page, shared-20 BJ): the 自定义 title over the
+   section tabs (Zi), the section's toolbar at the end of their row, a hairline under both. A section
+   on one of its own pages drops them for the breadcrumb in the titlebar. */
+
+.customize-head {
+  margin-bottom: 24px;
+}
+
+.customize-head .plugins-title {
+  margin-bottom: 12px;
+}
+
+.customize-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px var(--cds-gap-md);
+  border-bottom: 1px solid var(--cds-alpha-1);
+}
+
+.customize-nav {
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.customize-tabs {
+  display: flex;
+  gap: 20px;
+}
+
+.customize-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--cds-text-secondary);
+  font: inherit;
+  font-size: 14px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.customize-tab:hover,
+.customize-tab[aria-selected="true"] {
+  color: var(--cds-text-primary);
+}
+
+.customize-tab[aria-selected="true"] {
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.customize-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 -1px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--cds-text-primary);
+}
+
+.customize-tab:focus-visible {
+  border-radius: 4px;
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.customize-toolbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  margin-inline-start: auto;
+  padding-block: 4px;
+}
+
+.customize-toolbar .connectors-search {
+  width: 200px;
+}
+
+.plugins-crumb-root {
+  flex: none;
+  color: var(--cds-text-muted);
+}
+
+.plugins-lede {
+  margin: 0 0 16px;
+}
+
+/* The MCP form's list and map fields: one entry per line. */
+.customize-lines {
+  height: auto;
+  min-height: 72px;
+  padding-block: 8px;
+  font-size: 13px;
+  line-height: 18px;
+  resize: vertical;
+}
+
+.customize-doomed {
+  margin: 8px 0 0;
+  padding-inline-start: 20px;
+}
+
+.customize-skill-body {
+  max-height: 50vh;
+  margin-top: 12px;
+  overflow-y: auto;
+}
+
+/* ---------------------------------------------------------------------------
+   资料库 page (Library.tsx): Plugins' page shell; the Artifacts gallery's cards (c230724a2 $c: one,
+   two, three columns, gap-6, 254px cards) and rows (Ec: rounded px-md, ghost hover); the ChatGPT
+   app's folder squares, image wall (library-masonry: 1 to 4 columns at @sm / @xl / @3xl) and
+   notices. Widths are the page's own (an @container), not the window's. */
+
+.library-page {
+  container: library / inline-size;
+}
+
+/* Ra / pa: the breadcrumb row and an invisible copy of the whole path share one cell; the copy's
+   widths tell what fits. */
+.library-crumbs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  user-select: none;
+}
+
+.library-crumbs-row,
+.library-crumbs-ruler {
+  display: flex;
+  grid-area: 1 / 1;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.library-crumbs-ruler {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.library-crumbs-ruler > span {
+  display: flex;
+  align-items: center;
+  width: max-content;
+}
+
+.library-crumb {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.library-crumb + .library-crumb {
+  padding-inline-start: 4px;
+}
+
+.library-crumb[data-last] {
+  flex: 0 1 auto;
+}
+
+/* The titlebar gives way from the right: the controls shrink, the search first (Claude's PageHeader
+   keeps the title; better-codex has no second row for the search). Under 640 the filter chips go: the
+   filter button's accent and label say what is on. */
+.library-bar {
+  container: library-bar / inline-size;
+}
+
+.library-actions {
+  min-width: 0;
+}
+
+/* The filter and settings buttons keep their size: only the search gives way. */
+.library-actions > .popover-root {
+  flex: none;
+}
+
+/* A plain title stays whole; a breadcrumb gives way, folding into its … menu. */
+.library-title:has(> .cloud-title-text) {
+  flex-shrink: 0;
+}
+
+.library-actions .connectors-search {
+  flex: 0 1 200px;
+  width: auto;
+  min-width: 0;
+  height: var(--cds-h-control--lg);
+  border-radius: var(--cds-radius);
+}
+
+.library-chip {
+  gap: 4px;
+}
+
+/* 新建 keeps the primary's ink against the titlebar's secondary one. */
+.chat-header .library-actions .btn-primary,
+.chat-header .library-actions .btn-primary:hover:not(:disabled) {
+  color: var(--cds-on-primary);
+}
+
+.library-new-icon {
+  display: none;
+}
+
+/* Under 640 新建 is its Add glyph alone, a square as an icon button is. */
+@container library-bar (max-width: 640px) {
+  .library-chip,
+  .library-new-text,
+  .library-new-caret {
+    display: none;
+  }
+
+  .library-new {
+    width: var(--btn-h);
+    padding: 0;
+  }
+
+  .library-new-icon {
+    display: flex;
+  }
+
+  /* Centred: not the glyph-beside-a-label tuck (base.css). */
+  .btn.library-new:not(.btn-icon) > .library-new-icon {
+    margin: 0;
+  }
+}
+
+/* The storage warning (Ya, pageNotice) and the trash's note (mi). The warning lays out as Claude's
+   Banner (shared-frame Ik): the icon, the words with their actions wrapping under them, and the
+   close button in a column of its own by the first line. */
+.library-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cds-gap-sm);
+  margin: 0 0 20px;
+  padding: 10px 12px 10px 16px;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+  box-shadow: inset 0 0 0 1px var(--cds-alpha-1);
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.library-notice-icon,
+.library-notice-close {
+  flex: none;
+}
+
+/* The icon and the close button centred on the first line (h-[1lh]). */
+.library-notice-icon {
+  margin-block: 1px;
+  color: var(--cds-text-warning);
+}
+
+.library-notice-close {
+  margin-block: -1px;
+}
+
+.library-notice-body {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+}
+
+.library-notice-text {
+  flex: 1;
+  min-width: 200px;
+  margin: 0;
+}
+
+.library-notice-text strong {
+  color: var(--cds-text-primary);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.library-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+}
+
+@container library (min-width: 560px) {
+  .library-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container library (min-width: 720px) {
+  .library-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.library-folders {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(152px, 100%), 1fr));
+  gap: 16px;
+}
+
+.library-sections {
+  display: grid;
+  gap: 32px;
+}
+
+.library-section .plugins-section-title {
+  margin-bottom: 12px;
+}
+
+/* A card: the whole of it opens the item (a button under the rest, .library-hit, so its checkbox
+   and ⋯ are buttons of their own). The grid's is Claude's gallery card (cff9648a4 Ut): a
+   surface-2 face (surface-1 under the pointer, 0.98 while pressed) whose 1px ring is drawn on
+   ::after, over the thumbnail, then a 160px cover, a hairline and p-3.5 with a two-line medium title
+   over the caption. Folder squares and the image wall keep the ChatGPT app's shape, a framed cover
+   with the name under it, the frame on the cover's ::after for the same reason. */
+.library-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  border-radius: var(--cds-radius-card);
+  color: inherit;
+  text-align: start;
+}
+
+.library-hit {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  cursor: pointer;
+}
+
+.library-hit:focus-visible {
+  outline: none;
+}
+
+/* What the hit button lies under lets the pointer through to it. */
+:is(.library-card, .library-row) > :not(.library-hit, .library-check, .library-menu) {
+  pointer-events: none;
+}
+
+.library-card:has(> .library-hit:focus-visible) {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.library-card:not([data-shape]) {
+  gap: 0;
+  overflow: hidden;
+  background: var(--cds-surface-2);
+  transition: transform var(--cds-dur-snap) var(--cds-ease-snap);
+}
+
+.library-card:not([data-shape], .library-card-skeleton):hover {
+  background: var(--cds-surface-1);
+}
+
+.library-card:not([data-shape]):has(> .library-hit:active) {
+  transform: scale(0.98);
+}
+
+.library-card:not([data-shape])::after,
+.library-card[data-shape] .library-card-cover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--cds-ring-color);
+  pointer-events: none;
+  transition: box-shadow var(--cds-dur-fast) ease-out;
+}
+
+.library-card[data-shape] .library-card-cover::after {
+  box-shadow: inset 0 0 0 1px var(--cds-alpha-1);
+}
+
+.library-card[data-shape]:hover .library-card-cover::after {
+  box-shadow: inset 0 0 0 1px var(--cds-border-strong);
+}
+
+.library-card[data-open]:not([data-shape])::after,
+.library-card[data-open][data-shape] .library-card-cover::after {
+  box-shadow: inset 0 0 0 2px var(--cds-fill-accent);
+}
+
+/* Picked: a 2px ring in the text ink (ring-text); a folder a drag would drop into: the info ring
+   over a tint (ring-text-info, bg-text-info/10), in the solid accent here (the sidebar's drop
+   targets' ring-fill-accent: the accent border is near invisible on the dark page). */
+.library-card[data-selected]:not([data-shape])::after,
+.library-card[data-selected][data-shape] .library-card-cover::after {
+  box-shadow: inset 0 0 0 2px var(--cds-text-primary);
+}
+
+.library-card[data-drop]:not([data-shape])::after,
+.library-card[data-drop][data-shape] .library-card-cover::after {
+  background: var(--cds-bg-accent-muted);
+  box-shadow: inset 0 0 0 2px var(--cds-fill-accent);
+}
+
+.library-card-cover {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  height: 160px;
+  overflow: hidden;
+  color: var(--cds-text-muted);
+}
+
+.library-card[data-shape] .library-card-cover {
+  height: auto;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-1);
+}
+
+.library-card[data-shape="square"] .library-card-cover {
+  aspect-ratio: 1;
+}
+
+.library-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.library-card-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding-inline: 2px;
+}
+
+.library-card:not([data-shape]) .library-card-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
+  margin-inline: 1px;
+  padding: 14px 13px;
+  border-top: 1px solid var(--cds-alpha-1);
+}
+
+.library-card-title,
+.library-card-meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* On a one-line card the name gives way to a drop's 正在更新 spinner, which stays in sight (as a
+   list row's does). */
+.library-card[data-shape] .library-card-title {
+  display: flex;
+  align-items: center;
+}
+
+.library-card[data-shape] .library-card-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.library-card[data-shape] .library-updating {
+  flex: none;
+}
+
+.library-card-title {
+  color: var(--cds-text-primary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.library-card:not([data-shape]) .library-card-title {
+  display: -webkit-box;
+  font-size: var(--cds-font-size-body);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.library-card-meta {
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.library-card:not([data-shape]) .library-card-meta {
+  margin-top: auto;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
+}
+
+.library-card-meta:empty {
+  display: none;
+}
+
+.library-card-skeleton {
+  cursor: default;
+}
+
+.library-card.library-card-skeleton .library-card-cover {
+  background: var(--cds-alpha-1);
+}
+
+/* Every cell in row 1 of its column, moved down by what is above it (Masonry). */
+.library-masonry {
+  --masonry-columns: 1;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--masonry-columns), minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+}
+
+.library-masonry-item {
+  position: relative;
+  grid-row: 1;
+  min-width: 0;
+}
+
+@container library (min-width: 384px) {
+  .library-masonry {
+    --masonry-columns: 2;
+  }
+}
+
+@container library (min-width: 576px) {
+  .library-masonry {
+    --masonry-columns: 3;
+  }
+}
+
+@container library (min-width: 768px) {
+  .library-masonry {
+    --masonry-columns: 4;
+  }
+}
+
+/* The list (Rt in Ec rows: gap-x-md, py-xs over a min-h-10 text column, the trailing columns
+   footnote tabular-nums secondary): 名称, the date (160) and 大小 (88), the last two gone under 512.
+   The headers as better-codex's other Claude tables (c51c45b79 th: h-control footnote medium over a
+   1px rule). */
+.library-list {
+  margin-inline: calc(-1 * var(--cds-pad-md));
+}
+
+.library-list-head,
+.library-row {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-md);
+  padding-inline: var(--cds-pad-md);
+}
+
+.library-list-head {
+  height: var(--cds-h-control);
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--cds-border);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.library-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.library-head:hover {
+  color: var(--cds-text-primary);
+}
+
+.library-col-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.library-col-date {
+  flex: none;
+  width: 160px;
+}
+
+.library-col-size {
+  flex: none;
+  width: 88px;
+}
+
+.library-row :is(.library-col-date, .library-col-size) {
+  overflow: hidden;
+  font-size: var(--cds-font-size-footnote);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+@container library (max-width: 511px) {
+  .library-col-date,
+  .library-col-size {
+    display: none;
+  }
+}
+
+.library-rows {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.library-row {
+  position: relative;
+  width: 100%;
+  min-height: calc(40px + 2 * var(--cds-pad-xs));
+  padding-block: var(--cds-pad-xs);
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  text-align: start;
+}
+
+/* Ec's w-8 menu column at the row's end, kept for every row (and the header) so the columns line up. */
+.library-list-head,
+.library-row:not(.library-row-skeleton) {
+  padding-inline-end: calc(var(--cds-pad-md) + 32px);
+}
+
+.library-row:hover,
+.library-row:has(> .library-hit:focus-visible),
+.library-row:is([data-open], [data-menu-open]) {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.library-row[data-selected] {
+  background: var(--cds-fill-ghost-selected);
+}
+
+.library-row[data-drop] {
+  background: var(--cds-bg-accent-muted);
+  box-shadow: inset 0 0 0 2px var(--cds-fill-accent);
+}
+
+.library-row:has(> .library-hit:focus-visible) {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+/* cbbbbbd87 B.row: size-9 rounded-lg, the glyph on alpha-1 in secondary, no frame. */
+.library-row-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-secondary);
+}
+
+.library-row-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+}
+
+.library-row-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.library-row-skeleton {
+  cursor: default;
+}
+
+.library-row-skeleton .skeleton {
+  flex: 1;
+}
+
+/* cbef3b9e7 za: the bare glyph in primary, the words max-w-xs. */
+.library-empty-icon {
+  color: var(--cds-text-primary);
+}
+
+.library-empty > p {
+  max-width: 320px;
+}
+
+.library-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px 0 8px;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+}
+
+.library-sentinel {
+  display: grid;
+  place-items: center;
+  min-height: 1px;
+  padding-top: 16px;
+}
+
+/* An item's checkbox and ⋯ (selectable-library-item Xe, item-menu La): on a card at its cover's
+   top corners, over the picture on a surface of their own (mediaTranslucent); in a list the
+   checkbox in the gutter before the row (-start-6, here the 20px the page's padding leaves) and ⋯
+   in the row's end column. They show under the pointer or focus; a picked card keeps its
+   checkbox, a list keeps them all while anything is picked, an open menu keeps its ⋯. */
+.library-check,
+.library-menu {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  transition: opacity var(--cds-dur-fast) ease-out;
+}
+
+:is(.library-card, .library-row, .library-list-head):hover > :is(.library-check, .library-menu),
+:is(.library-card, .library-row, .library-list-head):has(:focus-visible) > :is(.library-check, .library-menu),
+:is(.library-card, .library-row)[data-selected] > .library-check,
+.library-row[data-selecting] > .library-check,
+.library-list[data-selecting] > .library-list-head > .library-check,
+:is(.library-card, .library-row)[data-menu-open] > .library-menu {
+  opacity: 1;
+}
+
+/* With no pointer to hover, the ⋯ stays (Claude's gallery menus: touch:opacity-100). */
+@media (hover: none), (pointer: coarse) {
+  .library-menu {
+    opacity: 1;
+  }
+}
+
+.library-card > .library-check {
+  top: 10px;
+  inset-inline-start: 10px;
+}
+
+.library-card > .library-menu {
+  top: 6px;
+  inset-inline-end: 6px;
+}
+
+.library-card .checkbox-box {
+  background: var(--cds-surface-3);
+}
+
+.library-card > .library-menu .btn {
+  background: color-mix(in srgb, var(--cds-surface-3) 88%, transparent);
+  box-shadow: var(--cds-shadow-card-ring);
+}
+
+.library-card > .library-menu .btn:hover {
+  background: var(--cds-surface-3);
+}
+
+.library-list-head {
+  position: relative;
+}
+
+:is(.library-row, .library-list-head) > .library-check {
+  top: 50%;
+  inset-inline-start: -20px;
+  translate: 0 -50%;
+}
+
+.library-row > .library-menu {
+  top: 50%;
+  inset-inline-end: 6px;
+  translate: 0 -50%;
+  color: var(--cds-text-secondary);
+}
+
+/* A tile 560 or narrower leaves no gutter: the checkbox takes the row icon's place. */
+@container tile-slot (max-width: 560px) {
+  :is(.library-row, .library-list-head) > .library-check {
+    inset-inline-start: calc(var(--cds-pad-md) + 8px);
+  }
+
+  .library-row:is(:hover, [data-selected], [data-selecting]) > .library-row-icon,
+  .library-row:has(:focus-visible) > .library-row-icon {
+    visibility: hidden;
+  }
+}
+
+.library-updating {
+  display: inline-flex;
+  margin-inline-start: 6px;
+  vertical-align: -1px;
+}
+
+/* The breadcrumb's folders take drops too. */
+.library-crumb-target[data-drop] {
+  border-radius: var(--cds-radius--sm);
+  background: var(--cds-bg-accent-muted);
+  box-shadow: 0 0 0 2px var(--cds-fill-accent);
+}
+
+/* The marquee (Wr: rounded-sm border-primary-outline bg-primary-ghost-hover), in the accent. */
+.library-area {
+  position: relative;
+}
+
+.library-marquee {
+  position: absolute;
+  z-index: 3;
+  border: 1px solid var(--cds-fill-accent);
+  border-radius: 4px;
+  background: var(--cds-bg-accent-muted);
+  pointer-events: none;
+}
+
+/* The selection's toolbar (We): a pill floating over the page's foot (bottom-6, h 46, gap-3,
+   px-6, rounded-full, shadow), on the toasts' surface rather than We's forced dark theme. The page
+   keeps room under its last row for it. */
+.library-selection {
+  position: absolute;
+  inset-inline: 16px;
+  bottom: 24px;
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.main-col:has(> .library-selection) .library-page {
+  padding-bottom: 104px;
+}
+
+.library-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  max-width: 100%;
+  height: 46px;
+  padding-inline: 20px 8px;
+  overflow-x: auto;
+  border-radius: 9999px;
+  background: var(--cds-surface-3);
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-md);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-footnote);
+  pointer-events: auto;
+}
+
+.library-toolbar .btn {
+  flex: none;
+  border-radius: 9999px;
+}
+
+.library-toolbar-count {
+  flex: none;
+  min-width: 96px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* A dimmed action still says why (We's tooltipContent): its wrapper takes the pointer. */
+.library-reason {
+  display: inline-flex;
+  flex: none;
+  border-radius: 9999px;
+}
+
+.library-reason > .btn:disabled {
+  pointer-events: none;
+}
+
+.library-reason:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+/* The trash's note with 清空文件回收站 at its end (mi). */
+.library-trash {
+  align-items: center;
+}
+
+/* Dialogs: a name field over its label (with a file's extension inside the field's end), the
+   confirmations' sentences, the move picker's path and folders. */
+.library-field {
+  display: grid;
+  gap: 8px;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.library-name {
+  position: relative;
+  display: block;
+}
+
+.library-name > .input {
+  width: 100%;
+}
+
+.library-name-suffix {
+  position: absolute;
+  top: 50%;
+  inset-inline-end: 12px;
+  translate: 0 -50%;
+  color: var(--cds-text-secondary);
+  pointer-events: none;
+  user-select: none;
+}
+
+.library-field-error {
+  margin: 8px 0 0;
+  color: var(--cds-text-danger);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+/* A confirmation's words sit in the dialog's description; a long name breaks anywhere. */
+.library-confirm {
+  overflow-wrap: anywhere;
+}
+
+.library-confirm-line {
+  display: block;
+}
+
+.library-confirm-line + .library-confirm-line {
+  margin-top: 8px;
+}
+
+.library-confirm strong {
+  color: var(--cds-text-primary);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+/* The crumbs above are ghost buttons; the current one gets their inline padding too, so every
+   separator sits evenly between names, and the row steps back by it so the first name lines up
+   with the title (its hover fill reaching past, as a ghost button's does). */
+.library-move-crumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 12px calc(-1 * var(--cds-pad-md--sm));
+  padding: 0;
+  list-style: none;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+}
+
+.library-move-crumbs li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.library-move-crumbs [aria-current] {
+  overflow: hidden;
+  max-width: 240px;
+  padding-inline: var(--cds-pad-md--sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.library-move-sep {
+  color: var(--cds-text-muted);
+}
+
+.library-move-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.library-move-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--cds-radius);
+  background: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: var(--cds-font-size-body);
+  text-align: start;
+  cursor: pointer;
+}
+
+.library-move-row:hover:not(:disabled) {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.library-move-row:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+.library-move-row:disabled {
+  opacity: var(--cds-opacity-disabled);
+  cursor: default;
+}
+
+.library-move-row > [data-cds="Icon"] {
+  color: var(--cds-text-secondary);
+}
+
+.library-move-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.library-move-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+}
+
+/* 从资料库添加 (LibraryPicker; pn: xwide, 680px, so the dialog's lg; 560 tall, gap-4): the search
+   and the view switch over the files, which scroll on their own (fading at the edges, as the
+   dialog's own scroll would) with the page's cards and rows (the page's widths come from its own
+   @container); the footer shows while something is picked, its count at the start. A
+   row's checkbox sits in its end column (pn's rightText), as the dialog leaves no gutter. */
+.dialog:has(> .dialog-body > .library-picker) {
+  height: 560px;
+  overflow: hidden;
+}
+
+.dialog-body:has(> .library-picker) {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+}
+
+.library-picker {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.library-picker-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-inline: var(--cds-pad-xl);
+}
+
+.library-picker-bar > .connectors-search {
+  flex: 1;
+  width: auto;
+}
+
+.library-picker-scroll {
+  container: library / inline-size;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px var(--cds-pad-xl) var(--cds-pad-lg);
+}
+
+.library-picker .library-row > .library-check {
+  inset-inline: auto var(--cds-pad-md);
+}
+
+.library-picker-count {
+  align-self: center;
+  margin-inline-end: auto;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+}
+
+/* The upload panel (library-uploads re): the window's bottom right, w-96, a card on the toasts'
+   surface (rounded-xl border shadow-lg); its head over rows of a 32px framed status icon, the
+   name and its state (red and wrapping once it failed), 重试 / 移除 / 取消 at the end. Under the
+   modals. It rises over a composer, the selection toolbar or 询问此文件 it would cover
+   (useDockClearance), by the room under its card rather than its place: the toasts, which rise
+   over it, see it resize. */
+.library-uploads {
+  position: fixed;
+  right: calc(env(safe-area-inset-right, 0px) + 16px);
+  bottom: 0;
+  z-index: calc(var(--z-modal) - 1);
+  width: 384px;
+  max-width: calc(100vw - 32px);
+  padding-bottom: calc(max(env(safe-area-inset-bottom, 0px), var(--upload-clearance, 0px)) + 16px);
+  pointer-events: none;
+  user-select: none;
+}
+
+.library-uploads-card {
+  pointer-events: auto;
+  overflow: hidden;
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-3);
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-md);
+  color: var(--cds-text-primary);
+}
+
+.library-uploads-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px 10px 16px;
+}
+
+.library-uploads-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.library-uploads-progress {
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  font-variant-numeric: tabular-nums;
+}
+
+.library-uploads-list {
+  max-height: 256px;
+  overflow-y: auto;
+  border-top: 1px solid var(--cds-border);
+}
+
+.library-upload {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 8px 10px 16px;
+}
+
+.library-upload + .library-upload {
+  border-top: 1px solid var(--cds-border);
+}
+
+.library-upload-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  color: var(--cds-text-secondary);
+}
+
+.library-upload[data-status="failed"] .library-upload-icon,
+.library-upload[data-status="failed"] .library-upload-status {
+  color: var(--cds-text-danger);
+}
+
+.library-upload[data-status="uploaded"] .library-upload-icon {
+  color: var(--cds-text-success);
+}
+
+.library-upload-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.library-upload-name,
+.library-upload-status {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.library-upload-name {
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.library-upload-status {
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.library-upload[data-status="failed"] .library-upload-status {
+  white-space: normal;
+}
+
+/* ---------------------------------------------------------------------------
+   The 资料库's file panel (LibraryFile.tsx): a pane (the session's pane chrome) beside the list
+   at half the page (the desktop app's RightPanelOutlet; Claude's ?open= split), alone once the
+   page is too narrow for both. Inside: the head (the name in primary ink, 版本 N in muted),
+   the renderer over the body, and 文件详情 / 版本历史记录 as a 280px column at its end (over
+   the body when the panel is narrow). */
+
+.main:has(> .library-panel-column) {
+  container: library-split / inline-size;
+}
+
+/* Not the session panes' narrow-window overlay: beside the list or alone, as the split decides. */
+@media (max-width: 860px) {
+  .library-panel-column {
+    position: static;
+    width: auto;
+    padding-left: 0;
+  }
+
+  .library-panel {
+    box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-sm);
+  }
+
+  .dark .library-panel {
+    box-shadow: var(--cds-shadow-sm);
+  }
+}
+
+@container library-split (max-width: 760px) {
+  .main-col:has(+ .library-panel-column) {
+    display: none;
+  }
+
+  .library-panel-column {
+    padding-left: 8px;
+  }
+
+  /* Alone, the head clears the collapsed sidebar's trigger as the list's titlebar does. */
+  .library-panel-head[data-collapsed] {
+    padding-inline-start: var(--df-trigger-right, 0px);
+  }
+}
+
+.library-panel-name {
+  color: var(--cds-text-primary);
+}
+
+.library-panel-version {
+  flex: none;
+  padding-inline-start: 6px;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 19px;
+  white-space: nowrap;
+}
+
+.library-panel-main {
+  container: library-panel / inline-size;
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.library-panel-body {
+  min-width: 0;
+}
+
+/* 询问此文件 (AskFile): the session composer's card on one line under the file (Ea's
+   auto-single-line), the size limit's note over it. */
+.library-ask.composer-wrap {
+  flex: none;
+  gap: 6px;
+  padding: 8px 12px 12px;
+}
+
+/* Ea's warning banner over it (the library's own, .library-notice), without the page's margin. */
+.library-ask-note {
+  margin: 0;
+}
+
+.library-ask .composer-input::placeholder {
+  color: var(--cds-text-muted);
+}
+
+/* A renderer's own bar (HTML's 源代码 / 预览) and a note over what it shows. */
+.library-panel-bar {
+  display: flex;
+  flex: none;
+  justify-content: center;
+  padding: 4px 12px 8px;
+}
+
+.library-note {
+  flex: none;
+}
+
+/* library-file-preview-fallback l: centred, px-6; max-w-sm, gap 16; a 64px rounded-2xl box in
+   bg-text/10 with a 32px glyph; the name truncated at 16 / medium, the lines under it 14 in the
+   description ink. */
+.library-fallback {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 0 24px;
+  overflow: auto;
+}
+
+.library-fallback-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: 384px;
+  text-align: center;
+}
+
+.library-fallback-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: var(--cds-alpha-2);
+  color: var(--cds-text-secondary);
+}
+
+.library-fallback-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.library-fallback-text p {
+  margin: 0;
+}
+
+.library-fallback-name {
+  overflow: hidden;
+  color: var(--cds-text-primary);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-fallback-note {
+  color: var(--cds-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.library-fallback-note:empty {
+  display: none;
+}
+
+.library-fallback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.library-fallback-actions:empty {
+  display: none;
+}
+
+/* The image (flex h-full flex-col p-6, the image max-h-full max-w-full rounded-lg object-contain
+   shadow-lg); it zooms into the lightbox. */
+.library-image {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: 24px;
+}
+
+/* The button fills the area (the image's max-height needs a sized parent); its cursor and focus ring are the image's. */
+.library-image-open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: default;
+}
+
+.library-image-open:focus-visible {
+  box-shadow: none;
+}
+
+.library-image-open > img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 8px;
+  object-fit: contain;
+  box-shadow: var(--cds-shadow-lg);
+  cursor: zoom-in;
+}
+
+.library-image-open:focus-visible > img {
+  box-shadow: var(--cds-focus-shadow), var(--cds-shadow-lg);
+}
+
+.library-html-frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: none;
+  background: #fff;
+}
+
+/* Sheets: a numbered grid of text cells, sticky headers, the sheets' tabs in a strip under it. */
+.library-sheet {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.library-sheet-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+}
+
+.library-sheet-scroll:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--cds-fill-accent);
+}
+
+.library-sheet-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--cds-text-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.library-sheet-table :is(th, td) {
+  max-width: 320px;
+  padding: 2px 8px;
+  overflow: hidden;
+  border-right: 1px solid var(--cds-alpha-2);
+  border-bottom: 1px solid var(--cds-alpha-2);
+  text-align: start;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-sheet-table th {
+  position: sticky;
+  background: var(--cds-surface-2);
+  color: var(--cds-text-muted);
+  font-weight: 400;
+}
+
+.library-sheet-table thead th {
+  top: 0;
+  z-index: 1;
+  text-align: center;
+}
+
+.library-sheet-table tbody th {
+  left: 0;
+  text-align: end;
+}
+
+.library-sheet-table thead th:first-child {
+  left: 0;
+  z-index: 2;
+}
+
+.library-sheet-tabs {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 4px;
+  overflow-x: auto;
+  border-top: 1px solid var(--cds-border);
+}
+
+.library-sheet-tab {
+  flex: none;
+  max-width: 200px;
+  padding: 2px 10px;
+  overflow: hidden;
+  border: none;
+  border-radius: var(--cds-radius);
+  background: none;
+  color: var(--cds-text-secondary);
+  font-size: 12px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-sheet-tab:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.library-sheet-tab[aria-selected="true"] {
+  background: var(--cds-fill-ghost-selected);
+  color: var(--cds-text-primary);
+}
+
+/* Word: docx-preview's own pages (white, on its grey wrapper) in a scroller, its shadow root's
+   host; paint containment keeps whatever the document positions (fixed too) inside it. Its
+   gutter stays, so zooming the pages to its width never toggles the scrollbar (a resize loop). */
+.library-docx-view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  contain: paint;
+  scrollbar-gutter: stable;
+}
+
+.library-docx-view[hidden] {
+  display: none;
+}
+
+/* Slides: white pages one under another; each a size container its text scales by. */
+.library-slides {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding: 16px;
+  overflow: auto;
+}
+
+.library-slide {
+  container-type: inline-size;
+  position: relative;
+  flex: none;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-sm);
+  color: #000;
+}
+
+/* Text runs past its box as PowerPoint draws it; a picture keeps to its own. */
+.library-slide-item {
+  position: absolute;
+}
+
+.library-slide-item > img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.library-slide-item > p {
+  margin: 0;
+  line-height: 1.2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Notebooks: cells down the page, code and outputs as the code fence draws them. */
+.library-notebook {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: var(--cds-pad-lg);
+  overflow: auto;
+}
+
+.library-nb-cell {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.library-nb-count {
+  color: var(--cds-text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.library-nb-code,
+.library-nb-output {
+  margin: 0;
+  padding: 8px 12px;
+  overflow-x: auto;
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 17px;
+  white-space: pre;
+}
+
+/* As .md-code draws a fence: its ring too, as the theme's ground may be the pane's own. */
+.library-nb-code {
+  background: var(--code-bg);
+  color: var(--code-fg);
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+}
+
+.library-nb-output {
+  max-height: 480px;
+  color: var(--cds-text-primary);
+  box-shadow: inset 0 0 0 1px var(--cds-alpha-2);
+}
+
+.library-nb-output[data-error] {
+  color: var(--cds-text-danger);
+}
+
+.library-nb-image {
+  align-self: flex-start;
+  max-width: 100%;
+  background: #fff;
+}
+
+/* 文件详情 / 版本历史记录: a column at the panel's end, over the body when the panel is narrow. */
+.library-side {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 280px;
+  min-height: 0;
+  border-inline-start: 1px solid var(--cds-border);
+  background: var(--cds-page-bg);
+}
+
+.library-side[hidden] {
+  display: none;
+}
+
+@container library-panel (max-width: 560px) {
+  .library-side {
+    position: absolute;
+    z-index: 2;
+    inset: 0;
+    width: auto;
+    border: none;
+  }
+}
+
+.library-side-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 36px;
+  padding: 0 4px 0 12px;
+}
+
+.library-side-title {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 19px;
+}
+
+.library-side-body {
+  flex: 1;
+  min-height: 0;
+  padding: 0 12px 16px;
+  overflow-y: auto;
+}
+
+.library-side-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  color: var(--cds-text-muted);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.library-info-name {
+  margin: 4px 0 0;
+  color: var(--cds-text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.library-info-place {
+  margin: 2px 0 12px;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+
+.library-info {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+}
+
+.library-info-row dt {
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.library-info-row dd {
+  margin: 2px 0 0;
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  line-height: 19px;
+  overflow-wrap: anywhere;
+}
+
+.library-versions ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.library-versions-day {
+  margin: 12px 0 4px;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.library-version {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--cds-radius);
+  background: none;
+  color: var(--cds-text-primary);
+  text-align: start;
+}
+
+.library-version:hover {
+  background: var(--cds-fill-ghost-hover);
+}
+
+.library-version[aria-current] {
+  background: var(--cds-fill-ghost-selected);
+}
+
+.library-version-line {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.library-version-time {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.library-version-what {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-version-meta {
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.library-versions-more {
+  margin-top: 8px;
+}
+
+/* A note (LibraryFile.tsx NoteEditor, preview-7136203c296a Xt): 正在保存… as a spinner beside
+   the name; the Markdown source in a field the panel's width, its text in a 48rem column from 24px
+   down (Xt's w-[min(48rem,calc(100vw-2rem))], pt-8), the notices over it (text-danger). */
+.library-panel-status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding-inline-start: 6px;
+  color: var(--cds-text-muted);
+}
+
+.library-note-notice {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  width: min(48rem, 100%);
+  margin: 0 auto;
+  padding: 8px 16px 0;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 19px;
+}
+
+.library-note-notice[data-danger] {
+  color: var(--cds-text-danger);
+}
+
+.library-note-field,
+.library-note-field:focus-visible {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 24px max(16px, calc((100% - 48rem) / 2)) 32px;
+  overflow-y: auto;
+  border: none;
+  outline: none;
+  background: none;
+  box-shadow: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: 15px;
+  line-height: 24px;
+  resize: none;
+}
+
+.library-note-field::placeholder {
+  color: var(--cds-text-muted);
+}
+
+/* A flashcard set (FlashcardsPreview je, grid t; grid-191c1e65b715): two cards across, three from
+   680px, four from 900px of the set's width, 976px at most; each 235:138 (160px tall at least below
+   420px), its front three lines; the owner's badge at its top end, a pencil at its bottom end on
+   hover. The editor covers the grid (bg-surface/70 with a blur), its two sides 371px wide at most,
+   side by side from 766px. */
+.library-flashcards {
+  container: library-flashcards / inline-size;
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.library-flashcards-note {
+  margin: 0;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 28px;
+  text-align: center;
+}
+
+.library-flashcards-scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 12px 16px 24px;
+  overflow-y: auto;
+}
+
+.library-flashcards-empty {
+  margin: 0;
+  padding: 40px 12px;
+  color: var(--cds-text-muted);
+  font-size: 14px;
+  line-height: 20px;
+  text-align: center;
+}
+
+.library-flashcards-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  max-width: 976px;
+  margin: 0 auto;
+}
+
+@container library-flashcards (min-width: 680px) {
+  .library-flashcards-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@container library-flashcards (min-width: 900px) {
+  .library-flashcards-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.library-flashcard {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 160px;
+  aspect-ratio: 235 / 138;
+  padding: 0 12px;
+  border: none;
+  border-radius: 16px;
+  background: var(--cds-surface-2);
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-sm);
+  color: var(--cds-text-primary);
+  font: inherit;
+  text-align: center;
+}
+
+@container library-flashcards (min-width: 420px) {
+  .library-flashcard {
+    min-height: 0;
+  }
+}
+
+.library-flashcard:has(> .library-flashcard-edit:hover),
+.library-flashcard-add:hover {
+  background: var(--cds-surface-1);
+}
+
+.library-flashcard-front {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  font-size: 16px;
+  line-height: 22px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+@container library-flashcards (min-width: 560px) {
+  .library-flashcard-front {
+    font-size: 18px;
+    line-height: 26px;
+  }
+}
+
+.library-flashcard-edit {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border: none;
+  border-radius: inherit;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.library-flashcard-edit:focus-visible,
+.library-flashcard-add:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.library-flashcard-pencil {
+  position: absolute;
+  inset-inline-end: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: var(--cds-text-secondary);
+  opacity: 0;
+  transition: opacity var(--cds-dur-base) ease-out;
+}
+
+.library-flashcard:is(:hover, :focus-within) .library-flashcard-pencil {
+  opacity: 1;
+}
+
+.library-flashcard-badge {
+  position: absolute;
+  top: 8px;
+  inset-inline-end: 8px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.library-flashcard-badge[data-outcome="known"] {
+  background: var(--cds-bg-success);
+  color: var(--cds-text-success);
+}
+
+.library-flashcard-badge[data-outcome="missed"] {
+  background: var(--cds-bg-warning);
+  color: var(--cds-text-warning);
+}
+
+.library-flashcard-add {
+  color: var(--cds-text-secondary);
+  cursor: pointer;
+}
+
+.library-flashcard-editor {
+  container: flashcard-editor / inline-size;
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--cds-page-bg) 70%, transparent);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+.library-flashcard-backdrop {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: default;
+}
+
+/* Clicks between the sides and the buttons reach the backdrop (pointer-events-none on the form). */
+.library-flashcard-form {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  max-width: 766px;
+  max-height: 100%;
+  padding: 24px 16px;
+  overflow-y: auto;
+  pointer-events: none;
+}
+
+.library-flashcard-fields {
+  display: grid;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: 16px;
+  width: 100%;
+  height: calc(2 * min(218px, 24dvh) + 1rem);
+}
+
+.library-flashcard-side {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 371px;
+  min-height: 0;
+  padding: 20px 24px;
+  overflow: hidden;
+  border-radius: 24px;
+  background: var(--cds-surface-2);
+  box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-md);
+  cursor: text;
+  pointer-events: auto;
+}
+
+.library-flashcard-side textarea,
+.library-flashcard-side textarea:focus-visible {
+  width: 100%;
+  max-height: 100%;
+  padding: 0;
+  overflow-y: auto;
+  border: none;
+  outline: none;
+  background: none;
+  box-shadow: none;
+  color: var(--cds-text-primary);
+  font: inherit;
+  font-size: 22px;
+  line-height: 30px;
+  text-align: center;
+  resize: none;
+  field-sizing: content;
+}
+
+.library-flashcard-side textarea::placeholder {
+  color: var(--cds-text-muted);
+}
+
+.library-flashcard-alert {
+  margin: 0;
+  color: var(--cds-text-danger);
+  font-size: 13px;
+  line-height: 19px;
+  text-align: center;
+  pointer-events: auto;
+}
+
+.library-flashcard-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  max-width: 371px;
+}
+
+.library-flashcard-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+@container flashcard-editor (min-width: 766px) {
+  .library-flashcard-fields {
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    height: 218px;
+  }
+
+  .library-flashcard-actions {
+    max-width: none;
+  }
+}
+
+/* 代码字号 set: open files follow it too (their own size is fixed otherwise). */
+:root[data-code-size] .file-code {
+  font-size: var(--code-size-override);
+  line-height: var(--code-leading-override);
+}
+
+/* Changes pane (Claude 4.4212 c9bd7af9c / c44d00c7f): the file list on the right, folder and kind
+   headings, viewed files dimmed, and a line's comments under it. */
+.diff-pane-main[data-list-side="right"] {
+  flex-direction: row-reverse;
+}
+
+.diff-folder,
+.diff-kind-heading {
+  overflow: hidden;
+  padding: 8px 6px 2px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-kind-heading {
+  padding: 12px 2px 4px;
+}
+
+.diff-file[data-viewed] .diff-file-name {
+  color: var(--cds-text-muted);
+}
+
+.file-diff[data-viewed] .file-path {
+  color: var(--cds-text-muted);
+}
+
+.file-diff-viewed {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: 4px;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-caption);
+}
+
+.diff-row[data-commentable] {
+  position: relative;
+}
+
+.diff-comment-add {
+  position: absolute;
+  inset-inline-start: 2px;
+  top: 50%;
+  display: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--cds-fill-accent);
+  color: var(--cds-text-on-accent, #fff);
+  transform: translateY(-50%);
+}
+
+.diff-row[data-commentable]:hover .diff-comment-add,
+.diff-comment-add:focus-visible {
+  display: grid;
+}
+
+.diff-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 8px 6px 84px;
+  padding: 8px 10px;
+  border-radius: var(--cds-radius);
+  background: var(--cds-surface-2);
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  font-family: var(--font-sans, inherit);
+  white-space: normal;
+}
+
+.diff-comment-text {
+  margin: 0;
+  color: var(--cds-text-primary);
+  white-space: pre-wrap;
+}
+
+.diff-comment-input {
+  width: 100%;
+  min-height: 48px;
+  resize: vertical;
+  border: none;
+  background: transparent;
+  color: var(--cds-text-primary);
+  font: inherit;
+  outline: none;
+}
+
+.diff-comment-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.diff-comment-state {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+}
+
+/* Files pane (Claude 4.4212 c9bd7af9c): the tree beside the open file, and the plain editor. */
+.files-pane-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.files-pane-tree {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  min-width: 0;
+  border-inline-end: 1px solid var(--cds-border);
+}
+
+.files-pane-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.file-tree {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.file-tree-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+}
+
+.file-tree-filter .input {
+  width: 100%;
+  height: 28px;
+  font-size: var(--cds-font-size-caption);
+}
+
+.file-tree-options {
+  display: flex;
+  gap: 2px;
+}
+
+.file-tree-option {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.file-tree-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 4px 8px;
+}
+
+.file-tree-row,
+.file-tree-hit {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-height: 24px;
+  padding-inline-end: 6px;
+  border-radius: var(--cds-radius);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-caption);
+  text-align: start;
+}
+
+.file-tree-row:hover,
+.file-tree-hit:hover {
+  background: var(--cds-fill-ghost-hover);
+  color: var(--cds-text-primary);
+}
+
+.file-tree-caret {
+  flex: none;
+  width: 12px;
+  transition: transform var(--cds-dur-fast) ease-out;
+}
+
+.file-tree-row[aria-expanded="true"] .file-tree-caret {
+  transform: rotate(90deg);
+}
+
+.file-tree-name,
+.file-tree-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tree-hit {
+  padding-inline-start: 22px;
+  font-family: var(--font-mono);
+}
+
+.file-tree-ln {
+  flex: none;
+  min-width: 2.5ch;
+  color: var(--cds-text-muted);
+  text-align: end;
+}
+
+.file-tree-note {
+  padding: 6px 8px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+}
+
+.file-editable {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.file-edit-key {
+  position: absolute;
+  top: 8px;
+  inset-inline-end: 16px;
+  opacity: 0;
+  transition: opacity var(--cds-dur-fast) ease-out;
+}
+
+.file-editable:hover .file-edit-key,
+.file-edit-key:focus-visible {
+  opacity: 1;
+}
+
+.file-editor {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.file-editor-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--cds-border);
+}
+
+.file-editor-status {
+  flex: 1;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+}
+
+.file-editor-status[data-status="conflict"] {
+  color: var(--cds-text-danger);
+}
+
+.file-editor-input {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 12px 24px;
+  resize: none;
+  border: none;
+  outline: none;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 17px;
+  white-space: pre;
+  overflow: auto;
+}
+
+.file-editor-input[data-wrap] {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+:root[data-code-size] .file-editor-input {
+  font-size: var(--code-size-override);
+  line-height: var(--code-leading-override);
+}

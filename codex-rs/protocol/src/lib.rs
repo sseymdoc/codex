@@ -37,7 +37,7 @@ pub mod mcp_policy;
 pub mod memory_citation;
 mod memory_version;
 pub use memory_version::MemoryVersion;
-pub mod codex_ui_context;
+pub mod better_codex_context;
 pub mod models;
 pub mod network_policy;
 pub mod num_format;

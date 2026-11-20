@@ -1,6 +1,6 @@
 packages:
   - codex-cli
-  - codex-ui
+  - better-codex
   - codex-rs/responses-api-proxy/npm
   - sdk/typescript
 

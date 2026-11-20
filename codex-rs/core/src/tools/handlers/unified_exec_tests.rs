@@ -27,7 +27,7 @@ const TEST_TRUNCATION_POLICY: TruncationPolicy = TruncationPolicy::Tokens(10_000
 
 #[test]
 fn command_description_is_optional_and_does_not_change_the_script() -> anyhow::Result<()> {
-    for description in [None, Some("运行 codex-ui 的全部测试")] {
+    for description in [None, Some("运行 better-codex 的全部测试")] {
         let mut input = serde_json::json!({ "cmd": "pnpm test" });
         if let Some(description) = description {
             input["description"] = description.into();

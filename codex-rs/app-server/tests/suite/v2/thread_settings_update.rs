@@ -49,8 +49,8 @@ use tokio::time::timeout;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
-#[path = "codex_ui_context_tests.rs"]
-mod codex_ui_context_tests;
+#[path = "better_codex_context_tests.rs"]
+mod better_codex_context_tests;
 
 #[tokio::test]
 async fn disabled_plugin_ids_replace_preserve_and_clear_without_inference() -> Result<()> {

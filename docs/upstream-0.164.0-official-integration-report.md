@@ -11,7 +11,7 @@
 - 共同上游基线：`ce0323f2f2d3b25e82806cd555237da3db4e1897`；本轮本地起点：`c04f59e4d9cce6cf5f1f3af257027a93499a1975`。
 - 隔离工作树：`.tmp/u164-official`；分支：`integration/upstream-0.164.0-official`。
 - 37 项均逐项保留 `cherry picked from commit` 来源记录。独立本地适配提交与官方提交分开登记。
-- 保留本地工作区身份 `0.164.0-alpha.3+codex-ui`，它不启用实验能力。
+- 保留本地工作区身份 `0.164.0-alpha.3+better-codex`，它不启用实验能力。
 - 本轮验证源码 HEAD：`1ed953c3a00cbf67c137e76637b8478e7da8f7cd`；`codex-rs` 树：`46a2df988d123802a853e2da6cd10b2106d487f5`。
 - 并行 UI 提交 `68164bd963`、`69c6b17edd`、`ee26889bb3` 已在隔离分支保留；合入前后后端树一致。UI 版本 `1.2.35` 来自并行工作，本任务未制作安装包。
 
@@ -27,7 +27,7 @@
 6. 协议生成物：stable / experimental `.zst`、JSON、TypeScript 和 Python SDK 类型均使用官方生成入口实际重建，保留本地协议扩展。
 7. 本地 UI：为官方新增 `preModelRequest`、`postModelRequest` 补齐中文名称映射。
 
-本地非原生能力沿用 `CODEX_UI_EXPERIMENTAL_BACKEND == "1"` 与 `Config.experimental_backend` 门控，覆盖声明、执行和自动调度；未引入通过普通配置、模型参数或版本号启用能力的路径。
+本地非原生能力沿用 `BETTER_CODEX_EXPERIMENTAL_BACKEND == "1"` 与 `Config.experimental_backend` 门控，覆盖声明、执行和自动调度；未引入通过普通配置、模型参数或版本号启用能力的路径。
 
 源码审计结果：37 个官方新增源码文件与正式标签的 Git blob 完全相同；对 394 个 Rust 文件中由本轮 37 项官方提交拥有的 20,968 行进行最终归属比较，未发现受保护代码行被删除或改写。该行审计忽略空白和纯标点，不代表整棵本地扩展树与上游逐字节相同；新增文件的 blob 比较则为精确内容比较。
 
@@ -100,7 +100,7 @@
 仍存在的旧基线与环境差异：
 
 - `codex-exec` 4 个测试构造器缺本地 `description`；`codex-tui` 12 个构造器缺本地 `backgrounded`。不属于本轮新增编译错误；未借合并改写官方测试构造器。
-- `codex-app-server-protocol::export::tests::generated_ts_optional_nullable_fields_only_in_params`：本地 `CodexUiContext` / `CodexUiDesktopContext` 的 3 个 optional nullable 字段触发既有断言。
+- `codex-app-server-protocol::export::tests::generated_ts_optional_nullable_fields_only_in_params`：本地 `BetterCodexContext` / `BetterCodexDesktopContext` 的 3 个 optional nullable 字段触发既有断言。
 - `codex-core::guardian::tests::guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history`：测试显式创建 4 MiB 子线程栈并溢出；已在旧主分支复现。
 - `voice-host` 需要 GStreamer 1.28 / GLib / `pkg-config`，本机未提供；该包系统构建失败在旧基线亦存在，未安装全局 SDK。
 - app-server 的 `sample_preserves_context_and_keeps_source_unchanged::threadhistorymode_legacy_turnstatus_completed_expects`：原线程文件字节一致性断言通过，后续上下文快照因真实用户 `~/.agents/skills` 进入目录而变化。官方 Windows `dirs` 使用系统 Known Folder，独立 `CODEX_HOME` 不能隔离；保留原测试和快照，未更改用户技能或系统配置。
@@ -114,7 +114,7 @@
 |---|---|---|
 | `89461ea6833832b0551ce24ee32205824d5c108d` | Unix standalone 安装后清理旧版本 | 本次 Windows 实验后端范围外；将来维护 Unix 安装器时单独合入并运行安装器测试。 |
 | `6fb1c3903d42e3cc7da2c89e3a045fe0ce137af4` | macOS Bazel 使用 hermetic dsymutil | 本次 Windows 实验后端范围外；将来进行 macOS Bazel 发布时合入并在 macOS 验证。 |
-| `6aaac694803004a63c6f393d153c96d22521a6b9` | 正式版本号改为 `0.164.0` | 按已登记兼容例外保留 `0.164.0-alpha.3+codex-ui`；构建身份策略变更前继续排除。 |
+| `6aaac694803004a63c6f393d153c96d22521a6b9` | 正式版本号改为 `0.164.0` | 按已登记兼容例外保留 `0.164.0-alpha.3+better-codex`；构建身份策略变更前继续排除。 |
 
 已恢复的 37 项不再列为未合入。此前 135 项的完整映射见 [上一轮报告](upstream-0.164.0-integration-report.md)。
 

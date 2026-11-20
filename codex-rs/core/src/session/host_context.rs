@@ -7,12 +7,12 @@ use codex_extension_api::{
     ExtensionData, PreviousWorldStateSection, RenderedWorldStateFragment,
     WorldStateSectionContribution, input_text,
 };
-use codex_protocol::codex_ui_context::CodexUiContext;
+use codex_protocol::better_codex_context::BetterCodexContext;
 use serde_json::Value;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-const REMINDER_ID: &str = "codex_ui_browser_reminder";
+const REMINDER_ID: &str = "better_codex_browser_reminder";
 #[derive(Default)]
 struct BrowserEdit {
     pending: AtomicBool,
@@ -27,18 +27,18 @@ pub(super) fn clear_pending(turn: &TurnContext) {
 
 pub(crate) fn planning_enabled(turn: &TurnContext, store: &ExtensionData) -> bool {
     if turn.config.experimental_backend
-        && let Some(context) = store.get::<CodexUiContext>()
+        && let Some(context) = store.get::<BetterCodexContext>()
     {
         return context.planning.enabled;
     }
     turn.config.update_plan_enabled
 }
 
-pub(crate) fn browser_enabled(step: &StepContext, context: &CodexUiContext) -> bool {
+pub(crate) fn browser_enabled(step: &StepContext, context: &BetterCodexContext) -> bool {
     browser_tools_enabled(&step.turn, &step.environments, context)
         && context.browser_verification.auto_verify
         && step.mcp.tools().iter().any(|tool| {
-            tool.server_name == "codex_ui_browser"
+            tool.server_name == "better_codex_browser"
                 && step.tool_router.exposes_tool(&tool.canonical_tool_name())
         })
 }
@@ -46,7 +46,7 @@ pub(crate) fn browser_enabled(step: &StepContext, context: &CodexUiContext) -> b
 pub(crate) fn browser_tools_enabled(
     turn: &TurnContext,
     environments: &TurnEnvironmentSnapshot,
-    context: &CodexUiContext,
+    context: &BetterCodexContext,
 ) -> bool {
     turn.config.experimental_backend
         && context.browser_verification.tools_enabled
@@ -68,7 +68,7 @@ pub(crate) fn desktop_tools_enabled(
             turn.session_source,
             codex_protocol::protocol::SessionSource::SubAgent(_)
         )
-        && store.get::<CodexUiContext>().is_some_and(|context| {
+        && store.get::<BetterCodexContext>().is_some_and(|context| {
             context.desktop.as_ref().is_some_and(|desktop| {
                 desktop.enabled
                     && (desktop.tools_disabled_text.is_none() || desktop.tools_text.is_some())
@@ -83,7 +83,7 @@ pub(crate) fn desktop_tools_enabled(
 pub(crate) fn workflows_enabled(turn: &TurnContext, store: &ExtensionData) -> bool {
     turn.config.experimental_backend
         && !turn.session_source.is_non_root_agent()
-        && store.get::<CodexUiContext>().is_some_and(|context| {
+        && store.get::<BetterCodexContext>().is_some_and(|context| {
             context
                 .workflows
                 .as_ref()
@@ -96,7 +96,7 @@ pub(crate) fn workflows_enabled(turn: &TurnContext, store: &ExtensionData) -> bo
 pub(crate) fn ultracode_enabled(turn: &TurnContext, store: &ExtensionData) -> bool {
     workflows_enabled(turn, store)
         && turn.code_mode_available
-        && store.get::<CodexUiContext>().is_some_and(|context| {
+        && store.get::<BetterCodexContext>().is_some_and(|context| {
             context
                 .workflows
                 .as_ref()
@@ -106,13 +106,13 @@ pub(crate) fn ultracode_enabled(turn: &TurnContext, store: &ExtensionData) -> bo
 
 /// Wraps the Ultracode reminders; a child never has Ultracode, so forks drop them.
 pub(crate) const ULTRACODE_MARKERS: (&str, &str) =
-    ("<codex_ui_ultracode>", "</codex_ui_ultracode>");
+    ("<better_codex_ultracode>", "</better_codex_ultracode>");
 
 /// Ultracode reminders: the on text whenever it turns on, the off text only after it was on.
 fn ultracode_section(on: bool, text: String, disabled: String) -> WorldStateSectionContribution {
     let retained = [text.clone(), disabled.clone()]
         .map(|body| format!("{}{body}{}", ULTRACODE_MARKERS.0, ULTRACODE_MARKERS.1));
-    WorldStateSectionContribution::new("codex_ui_ultracode", move |previous| {
+    WorldStateSectionContribution::new("better_codex_ultracode", move |previous| {
         let was_on = matches!(
             previous,
             PreviousWorldStateSection::Known(Value::Bool(true))
@@ -174,7 +174,7 @@ pub(super) async fn contribute(
         step.extension_data
             .remove::<codex_extension_api::ContextSnapshotReuse>();
     }
-    let Some(context) = step.extension_data.get::<CodexUiContext>() else {
+    let Some(context) = step.extension_data.get::<BetterCodexContext>() else {
         return;
     };
     if let Some(desktop) = &context.desktop {
@@ -185,8 +185,8 @@ pub(super) async fn contribute(
                 codex_protocol::protocol::SessionSource::SubAgent(_)
             );
         world.add_extension_section(section(
-            "codex_ui_desktop",
-            ("<codex_ui_desktop>", "</codex_ui_desktop>"),
+            "better_codex_desktop",
+            ("<better_codex_desktop>", "</better_codex_desktop>"),
             if enabled {
                 &desktop.text
             } else {
@@ -197,12 +197,15 @@ pub(super) async fn contribute(
         if let Some(disabled) = &desktop.tools_disabled_text {
             let tools = desktop_tools_enabled(&step.turn, &step.environments, &step.extension_data)
                 && step.mcp.tools().iter().any(|tool| {
-                    tool.server_name == "codex_ui_desktop"
+                    tool.server_name == "better_codex_desktop"
                         && step.tool_router.exposes_tool(&tool.canonical_tool_name())
                 });
             world.add_extension_section(section(
-                "codex_ui_desktop_tools",
-                ("<codex_ui_desktop_tools>", "</codex_ui_desktop_tools>"),
+                "better_codex_desktop_tools",
+                (
+                    "<better_codex_desktop_tools>",
+                    "</better_codex_desktop_tools>",
+                ),
                 if tools {
                     desktop.tools_text.as_ref().unwrap_or(disabled)
                 } else {
@@ -215,8 +218,8 @@ pub(super) async fn contribute(
     let planning =
         step.turn.config.experimental_backend && planning_enabled(&step.turn, &step.extension_data);
     world.add_extension_section(section(
-        "codex_ui_planning",
-        ("<codex_ui_planning>", "</codex_ui_planning>"),
+        "better_codex_planning",
+        ("<better_codex_planning>", "</better_codex_planning>"),
         if planning {
             &context.planning.text
         } else {
@@ -226,8 +229,8 @@ pub(super) async fn contribute(
     ));
     let browser = browser_enabled(step, &context);
     world.add_extension_section(section(
-        "codex_ui_browser",
-        ("<codex_ui_browser>", "</codex_ui_browser>"),
+        "better_codex_browser",
+        ("<better_codex_browser>", "</better_codex_browser>"),
         if browser {
             &context.browser_verification.text
         } else {
@@ -272,7 +275,10 @@ pub(super) async fn contribute(
             let fragment = (emit && !already).then(|| {
                 RenderedWorldStateFragment::new(
                     "developer",
-                    ("<codex_ui_browser_edit>", "</codex_ui_browser_edit>"),
+                    (
+                        "<better_codex_browser_edit>",
+                        "</better_codex_browser_edit>",
+                    ),
                     input_text(text.clone()),
                 )
             });
@@ -289,7 +295,7 @@ pub(crate) fn record_patch(
     if !step.turn.config.experimental_backend || environment.environment.is_remote() {
         return;
     }
-    let Some(context) = step.extension_data.get::<CodexUiContext>() else {
+    let Some(context) = step.extension_data.get::<BetterCodexContext>() else {
         return;
     };
     if !browser_enabled(step, &context) {
@@ -372,26 +378,26 @@ mod tests {
     use crate::session::session::SessionSettingsUpdate;
     use crate::session::tests::make_session_and_context_with_auth_and_config_and_rx;
     use codex_login::CodexAuth;
-    use codex_protocol::codex_ui_context::{
-        CodexUiBrowserContext, CodexUiDesktopContext, CodexUiPlanningContext,
-        CodexUiWorkflowsContext,
+    use codex_protocol::better_codex_context::{
+        BetterCodexBrowserContext, BetterCodexDesktopContext, BetterCodexPlanningContext,
+        BetterCodexWorkflowsContext,
     };
     use codex_protocol::openai_models::ReasoningEffort;
     use codex_tools::ToolName;
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
 
-    fn sample(cwd: codex_utils_absolute_path::AbsolutePathBuf) -> CodexUiContext {
-        CodexUiContext {
+    fn sample(cwd: codex_utils_absolute_path::AbsolutePathBuf) -> BetterCodexContext {
+        BetterCodexContext {
             desktop: None,
             workflows: None,
             cwd,
-            planning: CodexUiPlanningContext {
+            planning: BetterCodexPlanningContext {
                 enabled: true,
                 text: "HOST_PLAN_ENABLED".into(),
                 disabled_text: "HOST_PLAN_REVOKED".into(),
             },
-            browser_verification: CodexUiBrowserContext {
+            browser_verification: BetterCodexBrowserContext {
                 tools_enabled: false,
                 auto_verify: false,
                 text: "HOST_BROWSER_ENABLED".into(),
@@ -412,7 +418,7 @@ mod tests {
         )
         .await;
         let mut context = sample(session.get_config().await.cwd.clone());
-        context.desktop = Some(CodexUiDesktopContext {
+        context.desktop = Some(BetterCodexDesktopContext {
             enabled: true,
             text: "HOST_DESKTOP_ENABLED".into(),
             disabled_text: "HOST_DESKTOP_REVOKED".into(),
@@ -421,7 +427,7 @@ mod tests {
         });
         session
             .update_settings(SessionSettingsUpdate {
-                codex_ui_context: Some(context.clone()),
+                better_codex_context: Some(context.clone()),
                 ..Default::default()
             })
             .await
@@ -457,7 +463,7 @@ mod tests {
         context.desktop.as_mut().unwrap().enabled = false;
         session
             .update_settings(SessionSettingsUpdate {
-                codex_ui_context: Some(context.clone()),
+                better_codex_context: Some(context.clone()),
                 ..Default::default()
             })
             .await
@@ -509,7 +515,7 @@ mod tests {
         assert!(
             first
                 .extension_data
-                .get::<CodexUiContext>()
+                .get::<BetterCodexContext>()
                 .unwrap()
                 .planning
                 .enabled
@@ -519,13 +525,13 @@ mod tests {
             provenance: None,
         };
         let child = crate::agent::child_config::build_agent_spawn_config(&base, &first).unwrap();
-        let inherited = child.codex_ui_context.unwrap();
+        let inherited = child.better_codex_context.unwrap();
         assert!(inherited.planning.enabled);
         assert!(inherited.desktop.unwrap().enabled);
         assert!(
             !second
                 .extension_data
-                .get::<CodexUiContext>()
+                .get::<BetterCodexContext>()
                 .unwrap()
                 .desktop
                 .as_ref()
@@ -533,8 +539,8 @@ mod tests {
                 .enabled
         );
         let snapshot = session.thread_settings_snapshot().await;
-        assert!(!snapshot.codex_ui_desktop_context.unwrap().enabled);
-        let saved = snapshot.codex_ui_context.unwrap();
+        assert!(!snapshot.better_codex_desktop_context.unwrap().enabled);
+        let saved = snapshot.better_codex_context.unwrap();
         assert!(!saved.planning.enabled);
         assert!(
             saved.desktop.is_none(),
@@ -599,7 +605,7 @@ mod tests {
             assert!(
                 session
                     .update_settings(SessionSettingsUpdate {
-                        codex_ui_context: Some(context),
+                        better_codex_context: Some(context),
                         ..Default::default()
                     })
                     .await
@@ -609,7 +615,7 @@ mod tests {
                 session
                     .thread_settings_snapshot()
                     .await
-                    .codex_ui_context
+                    .better_codex_context
                     .is_none()
             );
         }
@@ -631,7 +637,7 @@ mod tests {
             )
             .await;
             let mut context = sample(session.get_config().await.cwd.clone());
-            context.workflows = Some(CodexUiWorkflowsContext {
+            context.workflows = Some(BetterCodexWorkflowsContext {
                 enabled: true,
                 ultracode,
                 ultracode_text: "HOST_ULTRACODE_ON".into(),
@@ -639,7 +645,7 @@ mod tests {
             });
             let update = session
                 .update_settings(SessionSettingsUpdate {
-                    codex_ui_context: Some(context),
+                    better_codex_context: Some(context),
                     ..Default::default()
                 })
                 .await;

@@ -211,28 +211,33 @@ impl InitializeRequestProcessor {
 
         let user_agent = get_codex_user_agent();
         let response = InitializeResponse {
-            codex_ui_host_context: (experimental_api_enabled && self.config.experimental_backend)
-                .then_some(true),
-            codex_ui_host_context_v2: (experimental_api_enabled
+            better_codex_host_context: (experimental_api_enabled
                 && self.config.experimental_backend)
                 .then_some(true),
-            codex_ui_desktop_context: (experimental_api_enabled
+            better_codex_host_context_v2: (experimental_api_enabled
                 && self.config.experimental_backend)
                 .then_some(true),
-            codex_ui_desktop_tools: (experimental_api_enabled && self.config.experimental_backend)
-                .then_some(true),
-            codex_ui_host_context_max_bytes: (experimental_api_enabled
-                && self.config.experimental_backend)
-                .then_some(codex_protocol::codex_ui_context::CODEX_UI_CONTEXT_MAX_BYTES as u32),
-            codex_ui_stdio_environments: (experimental_api_enabled
+            better_codex_desktop_context: (experimental_api_enabled
                 && self.config.experimental_backend)
                 .then_some(true),
-            codex_ui_background_terminals: (experimental_api_enabled
+            better_codex_desktop_tools: (experimental_api_enabled
                 && self.config.experimental_backend)
                 .then_some(true),
-            codex_ui_revert_switch: (experimental_api_enabled && self.config.experimental_backend)
+            better_codex_host_context_max_bytes: (experimental_api_enabled
+                && self.config.experimental_backend)
+                .then_some(
+                    codex_protocol::better_codex_context::BETTER_CODEX_CONTEXT_MAX_BYTES as u32,
+                ),
+            better_codex_stdio_environments: (experimental_api_enabled
+                && self.config.experimental_backend)
                 .then_some(true),
-            codex_ui_workflows: (experimental_api_enabled && self.config.experimental_backend)
+            better_codex_background_terminals: (experimental_api_enabled
+                && self.config.experimental_backend)
+                .then_some(true),
+            better_codex_revert_switch: (experimental_api_enabled
+                && self.config.experimental_backend)
+                .then_some(true),
+            better_codex_workflows: (experimental_api_enabled && self.config.experimental_backend)
                 .then_some(true),
             user_agent,
             codex_home,

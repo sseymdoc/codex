@@ -2463,7 +2463,7 @@
           "type": "object"
         },
         {
-          "description": "Codex UI experimental backend: one dynamic workflow run.",
+          "description": "Better Codex experimental backend: one dynamic workflow run.",
           "properties": {
             "agents": {
               "default": [],

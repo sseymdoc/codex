@@ -420,7 +420,7 @@ pub(super) async fn ensure_listener_task_running(
                         unloading_state.note_thread_activity_observed();
                         continue;
                     }
-                    // Workflows (Codex UI experimental backend) run on after the turn: an idle
+                    // Workflows (Better Codex experimental backend) run on after the turn: an idle
                     // unload would stop them unseen.
                     if !conversation.running_workflows().is_empty() {
                         unloading_state.defer_for_workflows();

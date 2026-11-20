@@ -624,7 +624,7 @@ pub struct Config {
     /// Process-owned gate for non-native backend capabilities; not a config-file option.
     pub experimental_backend: bool,
     /// Runtime-only host state; never loaded from TOML.
-    pub codex_ui_context: Option<codex_protocol::codex_ui_context::CodexUiContext>,
+    pub better_codex_context: Option<codex_protocol::better_codex_context::BetterCodexContext>,
     /// Desktop startup preferences; effective only under the process-owned gate.
     pub eager_mcp_tools: bool,
     pub connector_search: bool,
@@ -4464,10 +4464,10 @@ impl Config {
         .map_err(std::io::Error::from)?;
         let otel = otel::resolve_config(cfg.otel.unwrap_or_default(), &mut startup_warnings);
         let mut config = Self {
-            codex_ui_context: None,
-            experimental_backend: std::env::var("CODEX_UI_EXPERIMENTAL_BACKEND").as_deref() == Ok("1"),
-            eager_mcp_tools: std::env::var("CODEX_UI_TOOL_ACCESS_MODE").as_deref() == Ok("all"),
-            connector_search: std::env::var("CODEX_UI_CONNECTOR_SEARCH").as_deref() == Ok("1"),
+            better_codex_context: None,
+            experimental_backend: std::env::var("BETTER_CODEX_EXPERIMENTAL_BACKEND").as_deref() == Ok("1"),
+            eager_mcp_tools: std::env::var("BETTER_CODEX_TOOL_ACCESS_MODE").as_deref() == Ok("all"),
+            connector_search: std::env::var("BETTER_CODEX_CONNECTOR_SEARCH").as_deref() == Ok("1"),
             plugins: cfg.plugins,
             prefer_mxc,
             model,

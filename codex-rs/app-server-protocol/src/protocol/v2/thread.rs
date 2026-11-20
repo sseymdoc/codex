@@ -234,10 +234,10 @@ impl ThreadStartResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadSettingsUpdateParams {
-    /// Replace the complete Codex UI host snapshot. Omitted/null preserves it.
-    #[experimental("thread/settings/update.codexUiContext")]
+    /// Replace the complete Better Codex host snapshot. Omitted/null preserves it.
+    #[experimental("thread/settings/update.betterCodexContext")]
     #[ts(optional = nullable)]
-    pub codex_ui_context: Option<codex_protocol::codex_ui_context::CodexUiContext>,
+    pub better_codex_context: Option<codex_protocol::better_codex_context::BetterCodexContext>,
     pub thread_id: String,
     /// Replace this thread's disabled plugin IDs.
     /// Omitted/null preserves the list; [] clears it.
@@ -1293,7 +1293,7 @@ pub struct ThreadBackgroundTerminalsTerminateResponse {
     pub terminated: bool,
 }
 
-/// Codex UI experimental backend: stop waiting on a running command so it continues in the
+/// Better Codex experimental backend: stop waiting on a running command so it continues in the
 /// background and the model gets control back now.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
@@ -1311,7 +1311,7 @@ pub struct ThreadBackgroundTerminalsBackgroundResponse {
     pub backgrounded: bool,
 }
 
-/// Codex UI experimental backend: stop a running dynamic workflow and every agent it started.
+/// Better Codex experimental backend: stop a running dynamic workflow and every agent it started.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
@@ -1328,7 +1328,7 @@ pub struct ThreadWorkflowsStopResponse {
     pub stopped: bool,
 }
 
-/// Codex UI experimental backend: the workflow runs still live in this server.
+/// Better Codex experimental backend: the workflow runs still live in this server.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
@@ -1375,7 +1375,7 @@ pub struct ThreadRevertResponse {
     pub items_backwards_cursor: Option<String>,
 }
 
-/// Codex UI experimental backend: undo the thread's latest `thread/revert`, restoring the turns it
+/// Better Codex experimental backend: undo the thread's latest `thread/revert`, restoring the turns it
 /// removed, or redo it after an undo. Only while no turn has run on the thread since and the
 /// server has not restarted. Local files are not touched.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

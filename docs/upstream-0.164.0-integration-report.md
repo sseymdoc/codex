@@ -26,7 +26,7 @@
 - 验证源码：`9711cd58588c5ceb2b829df8e65b73d203e94207` 加 4 项锁文件版本校准；校准已提交为 `e519108b2d`。
 - 已验证后端源码树：`dfd7fd0df01671d59c2bdce61ab43dec9dde482f`，合入并行 UI 提交后完全一致。
 - 保留并行提交：`2a19fae657`、`0634280a42`、`20efe70f3e`；前端版本随其保持为 `1.2.34`。
-- 后端版本保持 `0.164.0-alpha.3+codex-ui`；新增 4 个工作区包的锁文件版本由 Cargo 对齐，未额外升级第三方依赖。
+- 后端版本保持 `0.164.0-alpha.3+better-codex`；新增 4 个工作区包的锁文件版本由 Cargo 对齐，未额外升级第三方依赖。
 - 使用 Rust `1.99.1`、Windows x64 MSVC 和校验过的 V8 `152.2.0`；系统默认 Rust 仍为 `1.95.0`。
 
 ## 验证结果
@@ -55,7 +55,7 @@ Rust 最终汇总共有 4,833 项通过。没有删除测试、修改断言或�
 
 - `codex-exec` 的 4 个测试构造器缺少本地 `description` 字段；原始主分支 Rust 1.95.0 下复现。
 - `codex-tui` 的 12 个测试构造器缺少本地 `backgrounded` 字段；原始主分支复现。
-- `generated_ts_optional_nullable_fields_only_in_params` 拒绝原有 `CodexUiContext`／`CodexUiDesktopContext` 的 3 处可空字段；原始主分支复现相同字段列表。
+- `generated_ts_optional_nullable_fields_only_in_params` 拒绝原有 `BetterCodexContext`／`BetterCodexDesktopContext` 的 3 处可空字段；原始主分支复现相同字段列表。
 - `guardian_ephemeral_retry_preserves_parallel_trunk_and_fork_history` 显式创建 4 MiB 子线程栈，出现 `STATUS_STACK_OVERFLOW`；原始主分支复现。增加外层 `RUST_MIN_STACK` 不改变该显式子线程限制。
 - Python 打包测试的 Unix／macOS 可执行权限检查在 Windows 下失败；原始主工作区复现相同 5 个错误。
 

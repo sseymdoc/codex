@@ -53,7 +53,7 @@ const DESCRIPTION: &str = include_str!("tool_description.md");
 const SIZE_GUIDELINE: &str = "\n\nSize guideline for this session: keep workflows under 10 agents. This is a guideline, not a hard limit; follow the user when they ask for more or fewer.";
 /// Ceiling on scripts' concurrent `agent()` host calls, below the host's pending-call limit.
 const MAX_IN_FLIGHT_CALLS: usize = 512;
-const APPROVAL_PREFIX: &str = "codex_ui_workflow_approval:";
+const APPROVAL_PREFIX: &str = "better_codex_workflow_approval:";
 const RUN_ONCE: &str = "Run workflow";
 const RUN_SESSION: &str = "Allow for this session";
 const DECLINE: &str = "Decline";

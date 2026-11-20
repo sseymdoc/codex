@@ -5,45 +5,45 @@ import type { AbsolutePathBuf } from "./AbsolutePathBuf";
 
 export type InitializeResponse = {
 /**
- * Present only when this running backend accepts Codex UI host context updates.
+ * Present only when this running backend accepts Better Codex host context updates.
  */
-codexUiHostContext?: boolean,
+betterCodexHostContext?: boolean,
 /**
  * Present only when desktop tool guidance is gated per sampling environment.
  */
-codexUiHostContextV2?: boolean,
+betterCodexHostContextV2?: boolean,
 /**
  * Present only when the host context accepts the fixed desktop module.
  */
-codexUiDesktopContext?: boolean,
+betterCodexDesktopContext?: boolean,
 /**
- * Present only when local Codex UI display tools use native sampling gates.
+ * Present only when local Better Codex display tools use native sampling gates.
  */
-codexUiDesktopTools?: boolean,
+betterCodexDesktopTools?: boolean,
 /**
- * Present only when Codex UI host context is accepted; its total UTF-8 byte limit.
+ * Present only when Better Codex host context is accepted; its total UTF-8 byte limit.
  */
-codexUiHostContextMaxBytes?: number,
+betterCodexHostContextMaxBytes?: number,
 /**
- * Present only when this running backend accepts Codex UI stdio environments
+ * Present only when this running backend accepts Better Codex stdio environments
  * (`environment/addStdio`, `environment/readDirectory`).
  */
-codexUiStdioEnvironments?: boolean,
+betterCodexStdioEnvironments?: boolean,
 /**
  * Present only when this running backend accepts
  * `thread/backgroundTerminals/background` (background a running command now).
  */
-codexUiBackgroundTerminals?: boolean,
+betterCodexBackgroundTerminals?: boolean,
 /**
  * Present only when this running backend accepts `thread/revert/switch` (undo / redo a
  * revert).
  */
-codexUiRevertSwitch?: boolean,
+betterCodexRevertSwitch?: boolean,
 /**
  * Present only when this running backend offers the dynamic `workflow` tool and
  * accepts `thread/workflows/stop` / `thread/workflows/list`.
  */
-codexUiWorkflows?: boolean, userAgent: string,
+betterCodexWorkflows?: boolean, userAgent: string,
 /**
  * Absolute path to the server's $CODEX_HOME directory.
  */

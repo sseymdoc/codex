@@ -74,7 +74,7 @@ fn persisted_mode_is_restored_only_when_missing_from_history() {
     );
 }
 
-/// Leaving Codex UI's Ultracode mode for no mode retracts it like the proactive mode.
+/// Leaving Better Codex's Ultracode mode for no mode retracts it like the proactive mode.
 #[test]
 fn ultracode_mode_is_retracted_when_the_mode_goes_away() {
     let ultracode = state(Some(MultiAgentMode::Custom(

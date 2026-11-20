@@ -132,7 +132,7 @@ impl LocalAgentRuntime {
         Ok(descendants)
     }
 
-    /// Codex UI experimental backend: interrupts the spawned agents under `root_thread_id` that
+    /// Better Codex experimental backend: interrupts the spawned agents under `root_thread_id` that
     /// are starting or running a turn, as Claude's interrupt sweep stops background agents. Idle
     /// agents are left alone: an interrupt would drop their pending background wakes.
     pub(crate) async fn interrupt_running_descendants(&self, root_thread_id: ThreadId) {

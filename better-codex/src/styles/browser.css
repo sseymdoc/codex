@@ -1,0 +1,440 @@
+/* Claude 2.42304 browser panel: 32px pane head; compact tabs and 24px address field. */
+[data-pane="browser"] .pane-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+[data-pane="browser"] .pane-title {
+  min-width: 0;
+  flex: 1;
+}
+.browser-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.browser-tab {
+  display: flex;
+  align-items: center;
+  flex: 1 1 140px;
+  max-width: 190px;
+  min-width: 62px;
+  height: 26px;
+  border-radius: 5px;
+  color: var(--cds-text-secondary);
+}
+.browser-tab[data-active] {
+  background: var(--cds-alpha-2);
+  color: var(--cds-text-primary);
+}
+.browser-tab > button:first-child {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.browser-tab > button:first-child > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.browser-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-right: 3px;
+  background: none;
+  border: 0;
+  color: inherit;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.browser-tab-close:hover {
+  background: var(--cds-alpha-2);
+}
+/* The toolbar under the head (c224804cc N, followsPaneHeader: shared-15 T7): 36 tall, 4 in,
+   8 between its groups and 2 inside one; 前进 and 选择元素 drop out under 320px (M). */
+.browser-toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 36px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--cds-border);
+  container-type: inline-size;
+}
+.browser-toolbar .btn {
+  --btn-h: 26px;
+  --btn-r: 5px;
+}
+.browser-tool-group {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+@container (width < 320px) {
+  .browser-roomy {
+    display: none;
+  }
+}
+/* The address field (cf550b864 fe): a control-tall field (fill-field, the 1px field ring, the
+   strong ring on hover, the focus shadow while the input has it) in heading text. Unfocused,
+   the input hides under the URL as shown (host primary, the rest muted); empty, 输入 URL. */
+.browser-address {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  height: 26px;
+  padding-inline: var(--cds-pad-xs);
+  border-radius: var(--cds-radius);
+  background: var(--cds-fill-field);
+  box-shadow: inset 0 0 0 1px var(--cds-fill-field-ring);
+  font-size: var(--cds-font-size-heading);
+  line-height: var(--cds-leading-heading);
+  transition: box-shadow 150ms ease-out;
+}
+.browser-address:hover:not(:has(input:focus)) {
+  box-shadow: inset 0 0 0 1px var(--cds-border-strong);
+}
+.browser-address:has(input:focus) {
+  box-shadow: var(--cds-focus-shadow);
+}
+/* No ring of its own: the field draws it (hide-focus-ring). */
+.browser-address input {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 0 var(--cds-pad-xs);
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  color: var(--cds-text-primary);
+  caret-color: var(--cds-fill-accent);
+  font: inherit;
+  text-overflow: ellipsis;
+}
+.browser-address input[data-covered] {
+  opacity: 0;
+}
+.browser-address-cover {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding-inline: calc(2 * var(--cds-pad-xs));
+  color: var(--cds-text-primary);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.browser-address-cover > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.browser-address-hint,
+.browser-address-path {
+  color: var(--cds-text-muted);
+}
+.browser-page {
+  position: relative;
+  flex: 1;
+  min-height: 40px;
+  background: var(--cds-surface-1);
+}
+.browser-page:focus-visible {
+  outline: 2px solid var(--cds-fill-accent);
+  outline-offset: -2px;
+}
+.browser-page .pane-empty {
+  height: 100%;
+}
+/* cf580efe9 Rr / Vr: the glyph in disabled ink, the line under the title 44ch, then the
+   prompt line in muted footnote text with its ghost button 3px off. */
+.browser-page .pane-empty-icon {
+  color: var(--cds-text-disabled);
+}
+.browser-page .pane-empty-body {
+  max-width: 44ch;
+}
+.browser-page .pane-empty-actions {
+  align-items: center;
+  gap: 0 3px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+/* cf580efe9 pi: a server row's run / stop key, an sm icon button at least 32 wide. */
+.browser-server-key {
+  flex: none;
+  min-width: 32px;
+  margin-inline-start: auto;
+}
+/* cf580efe9 fa / da: the list, at least min(400px, 75%) wide, centred in what the two footnote
+   lines leave; a row is the Cache glyph, the name and its :port, then its key. A live row opens
+   its server and fills on hover. */
+.browser-start {
+  height: 100%;
+  overflow-y: auto;
+}
+.browser-start > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--cds-gap-lg);
+  min-height: 100%;
+  padding: var(--cds-pad-lg);
+}
+.browser-start-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+.browser-start-main > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-sm);
+  min-width: min(400px, 75%);
+}
+.browser-start-busy {
+  display: flex;
+  justify-content: center;
+  padding: var(--cds-pad-lg) 0;
+}
+.browser-start-list {
+  display: flex;
+  flex-direction: column;
+  max-height: min(60vh, 480px);
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--cds-border);
+  border-radius: var(--cds-radius);
+}
+.browser-start-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  padding: var(--cds-pad-md);
+  padding-inline-start: 9px;
+  border-bottom: 1px solid var(--cds-border);
+  color: var(--cds-text-secondary);
+}
+.browser-start-list li:last-child {
+  border-bottom: 0;
+}
+/* The row's main button draws no ring of its own: the row shows its focus. */
+.browser-start-list li:is(:focus-visible, :has(> button:first-child:focus-visible)) {
+  outline: 1px solid var(--cds-fill-accent);
+  outline-offset: -1px;
+  box-shadow: none;
+}
+.browser-start-list li[data-open]:is(:hover, :has(:focus-visible)) {
+  background: var(--cds-alpha-2);
+}
+.browser-start-list li > button:first-child {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  outline: none;
+  box-shadow: none;
+  cursor: pointer;
+}
+.browser-start-list .btn {
+  flex: none;
+  min-width: 32px;
+}
+.browser-start-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--cds-font-size-body);
+}
+.browser-start-port {
+  flex: none;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  font-variant-numeric: tabular-nums;
+}
+.browser-start-more {
+  width: 100%;
+  color: var(--cds-text-muted);
+}
+.browser-start-more:hover {
+  color: var(--cds-text-primary);
+}
+.browser-start-notes {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.browser-start-notes p {
+  max-width: 48ch;
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  text-align: center;
+}
+.browser-error {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  align-items: start;
+  justify-content: space-between;
+  padding: 8px 12px;
+  color: var(--cds-text-danger);
+  background: var(--cds-alpha-1);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.browser-error button {
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.browser-logs {
+  flex: none;
+  height: 160px;
+  min-height: 70px;
+  border-top: 1px solid var(--cds-border);
+  background: var(--cds-surface-1);
+}
+.browser-logs > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  color: var(--cds-text-secondary);
+}
+.browser-logs pre {
+  height: calc(100% - 28px);
+  margin: 0;
+  padding: 4px 10px;
+  overflow: auto;
+  font-family: var(--cds-font-mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+.browser-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--cds-border);
+}
+.browser-setting strong {
+  font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+.browser-setting p,
+.browser-muted {
+  margin: 5px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--cds-text-secondary);
+}
+.browser-origins {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.browser-origins li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.browser-server {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--cds-border);
+}
+.browser-server p,
+.browser-server small {
+  margin: 4px 0 0;
+  color: var(--cds-text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.browser-server input {
+  width: 90px;
+  margin-left: 8px;
+}
+.browser-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 12px 0;
+}
+.browser-server-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 12px 0;
+}
+.browser-server-form label,
+.browser-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+}
+.browser-fields {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+}
+.browser-fields input {
+  width: 110px;
+}
+.browser-annotation {
+  display: block;
+  max-width: 100%;
+  max-height: 65vh;
+  object-fit: contain;
+  cursor: crosshair;
+  touch-action: none;
+  border: 1px solid var(--cds-border);
+  border-radius: 6px;
+}

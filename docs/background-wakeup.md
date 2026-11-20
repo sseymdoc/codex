@@ -1,11 +1,11 @@
 # 后台任务完成后续跑
 
-这两个开关由 Codex 后端实现，Codex UI 使用现有轮次事件显示续跑结果。
+这两个开关由 Codex 后端实现，Better Codex 使用现有轮次事件显示续跑结果。
 需要构建并选择包含此改动的后端，并在桌面设置中启用“实验型后端”的 Release 或
 Preview，重启后生效；只更新 UI 不会启用它们。
 
 这两类能力和等待指引统一受 `Config.experimental_backend` 控制。桌面启动时由实际
-启用的后端档位决定子进程标记 `CODEX_UI_EXPERIMENTAL_BACKEND=1`；禁用时桥接层
+启用的后端档位决定子进程标记 `BETTER_CODEX_EXPERIMENTAL_BACKEND=1`；禁用时桥接层
 明确设为 `0`，覆盖继承环境。没有标记也默认关闭，它不是 `config.toml` 可启用的选项。
 单纯设置 `CODEX_BIN` 指向自编译程序不会启用这些能力；网页桥接默认关闭。
 关闭时模型工具声明不暴露唤醒参数，即使直接提交该参数或配置 `asyncRewake`，也不会
@@ -88,7 +88,7 @@ Windows 使用 PowerShell 执行外部程序时，可在命令末尾加 `; exit 
 测试入口：`core/tests/suite/background_wakeup.rs`、`unified_exec.rs` 的
 `background_exit_wakeup`、`wake_reservation.rs`，以及 `core` 的 `background_` 单元测试。
 Windows 测试进程需要足够的线程栈，例如 `RUST_MIN_STACK=16777216`。
-这些验证不代表已切换正在运行的 Codex UI 后端，也不包含真实在线模型验收。
+这些验证不代表已切换正在运行的 Better Codex 后端，也不包含真实在线模型验收。
 
 ### 本地验证记录（2026-10-20，Windows）
 

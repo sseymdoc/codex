@@ -428,7 +428,7 @@ pub enum ThreadItem {
     },
     Sleep(SleepItem),
     ImageGeneration(ImageGenerationItem),
-    /// Codex UI experimental backend: one dynamic workflow run.
+    /// Better Codex experimental backend: one dynamic workflow run.
     Workflow(WorkflowItem),
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]

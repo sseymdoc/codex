@@ -3467,44 +3467,36 @@
     "InitializeResponse": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
-        "codexHome": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/v2/AbsolutePathBuf"
-            }
-          ],
-          "description": "Absolute path to the server's $CODEX_HOME directory."
-        },
-        "codexUiBackgroundTerminals": {
+        "betterCodexBackgroundTerminals": {
           "description": "Present only when this running backend accepts `thread/backgroundTerminals/background` (background a running command now).",
           "type": [
             "boolean",
             "null"
           ]
         },
-        "codexUiDesktopContext": {
+        "betterCodexDesktopContext": {
           "description": "Present only when the host context accepts the fixed desktop module.",
           "type": [
             "boolean",
             "null"
           ]
         },
-        "codexUiDesktopTools": {
-          "description": "Present only when local Codex UI display tools use native sampling gates.",
+        "betterCodexDesktopTools": {
+          "description": "Present only when local Better Codex display tools use native sampling gates.",
           "type": [
             "boolean",
             "null"
           ]
         },
-        "codexUiHostContext": {
-          "description": "Present only when this running backend accepts Codex UI host context updates.",
+        "betterCodexHostContext": {
+          "description": "Present only when this running backend accepts Better Codex host context updates.",
           "type": [
             "boolean",
             "null"
           ]
         },
-        "codexUiHostContextMaxBytes": {
-          "description": "Present only when Codex UI host context is accepted; its total UTF-8 byte limit.",
+        "betterCodexHostContextMaxBytes": {
+          "description": "Present only when Better Codex host context is accepted; its total UTF-8 byte limit.",
           "format": "uint32",
           "minimum": 0.0,
           "type": [
@@ -3512,33 +3504,41 @@
             "null"
           ]
         },
-        "codexUiHostContextV2": {
+        "betterCodexHostContextV2": {
           "description": "Present only when desktop tool guidance is gated per sampling environment.",
           "type": [
             "boolean",
             "null"
           ]
         },
-        "codexUiRevertSwitch": {
+        "betterCodexRevertSwitch": {
           "description": "Present only when this running backend accepts `thread/revert/switch` (undo / redo a revert).",
           "type": [
             "boolean",
             "null"
           ]
         },
-        "codexUiStdioEnvironments": {
-          "description": "Present only when this running backend accepts Codex UI stdio environments (`environment/addStdio`, `environment/readDirectory`).",
+        "betterCodexStdioEnvironments": {
+          "description": "Present only when this running backend accepts Better Codex stdio environments (`environment/addStdio`, `environment/readDirectory`).",
           "type": [
             "boolean",
             "null"
           ]
         },
-        "codexUiWorkflows": {
+        "betterCodexWorkflows": {
           "description": "Present only when this running backend offers the dynamic `workflow` tool and accepts `thread/workflows/stop` / `thread/workflows/list`.",
           "type": [
             "boolean",
             "null"
           ]
+        },
+        "codexHome": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/v2/AbsolutePathBuf"
+            }
+          ],
+          "description": "Absolute path to the server's $CODEX_HOME directory."
         },
         "platformFamily": {
           "description": "Platform family for the running app-server target, for example `\"unix\"` or `\"windows\"`.",
@@ -8303,6 +8303,159 @@
         },
         "type": "object"
       },
+      "BetterCodexBrowserContext": {
+        "additionalProperties": false,
+        "properties": {
+          "autoVerify": {
+            "type": "boolean"
+          },
+          "disabledText": {
+            "type": "string"
+          },
+          "editReminder": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "toolsEnabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "autoVerify",
+          "disabledText",
+          "editReminder",
+          "text",
+          "toolsEnabled"
+        ],
+        "type": "object"
+      },
+      "BetterCodexContext": {
+        "additionalProperties": false,
+        "description": "Fixed, host-owned sections. This cannot enable the experimental backend.",
+        "properties": {
+          "browserVerification": {
+            "$ref": "#/definitions/v2/BetterCodexBrowserContext"
+          },
+          "cwd": {
+            "$ref": "#/definitions/v2/AbsolutePathBuf"
+          },
+          "desktop": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/BetterCodexDesktopContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Omitted/null preserves the previously applied desktop module."
+          },
+          "planning": {
+            "$ref": "#/definitions/v2/BetterCodexPlanningContext"
+          },
+          "workflows": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/BetterCodexWorkflowsContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Dynamic workflows. Omitted/null keeps the `workflow` tool off; send it only to a backend that reports `betterCodexWorkflows`."
+          }
+        },
+        "required": [
+          "browserVerification",
+          "cwd",
+          "planning"
+        ],
+        "type": "object"
+      },
+      "BetterCodexDesktopContext": {
+        "additionalProperties": false,
+        "properties": {
+          "disabledText": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          },
+          "toolsDisabledText": {
+            "description": "V2 revocation. Present without tools_text explicitly disables local tools.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "toolsText": {
+            "description": "V2 local tool guidance, selected from the same snapshot as tool execution.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "disabledText",
+          "enabled",
+          "text"
+        ],
+        "type": "object"
+      },
+      "BetterCodexPlanningContext": {
+        "additionalProperties": false,
+        "properties": {
+          "disabledText": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "disabledText",
+          "enabled",
+          "text"
+        ],
+        "type": "object"
+      },
+      "BetterCodexWorkflowsContext": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "description": "The dynamic workflows setting: offers the `workflow` tool.",
+            "type": "boolean"
+          },
+          "ultracode": {
+            "description": "Ultracode is on for this thread: a standing opt-in to orchestrate with workflows.",
+            "type": "boolean"
+          },
+          "ultracodeDisabledText": {
+            "description": "Sent when Ultracode turns off after having been on.",
+            "type": "string"
+          },
+          "ultracodeText": {
+            "description": "Sent when Ultracode turns on.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "ultracode",
+          "ultracodeDisabledText",
+          "ultracodeText"
+        ],
+        "type": "object"
+      },
       "BrowserUseAccessApprovalLifetime": {
         "enum": [
           "turn",
@@ -8775,159 +8928,6 @@
           "bemTags"
         ],
         "type": "string"
-      },
-      "CodexUiBrowserContext": {
-        "additionalProperties": false,
-        "properties": {
-          "autoVerify": {
-            "type": "boolean"
-          },
-          "disabledText": {
-            "type": "string"
-          },
-          "editReminder": {
-            "type": "string"
-          },
-          "text": {
-            "type": "string"
-          },
-          "toolsEnabled": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "autoVerify",
-          "disabledText",
-          "editReminder",
-          "text",
-          "toolsEnabled"
-        ],
-        "type": "object"
-      },
-      "CodexUiContext": {
-        "additionalProperties": false,
-        "description": "Fixed, host-owned sections. This cannot enable the experimental backend.",
-        "properties": {
-          "browserVerification": {
-            "$ref": "#/definitions/v2/CodexUiBrowserContext"
-          },
-          "cwd": {
-            "$ref": "#/definitions/v2/AbsolutePathBuf"
-          },
-          "desktop": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/v2/CodexUiDesktopContext"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Omitted/null preserves the previously applied desktop module."
-          },
-          "planning": {
-            "$ref": "#/definitions/v2/CodexUiPlanningContext"
-          },
-          "workflows": {
-            "anyOf": [
-              {
-                "$ref": "#/definitions/v2/CodexUiWorkflowsContext"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Dynamic workflows. Omitted/null keeps the `workflow` tool off; send it only to a backend that reports `codexUiWorkflows`."
-          }
-        },
-        "required": [
-          "browserVerification",
-          "cwd",
-          "planning"
-        ],
-        "type": "object"
-      },
-      "CodexUiDesktopContext": {
-        "additionalProperties": false,
-        "properties": {
-          "disabledText": {
-            "type": "string"
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "text": {
-            "type": "string"
-          },
-          "toolsDisabledText": {
-            "description": "V2 revocation. Present without tools_text explicitly disables local tools.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "toolsText": {
-            "description": "V2 local tool guidance, selected from the same snapshot as tool execution.",
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "disabledText",
-          "enabled",
-          "text"
-        ],
-        "type": "object"
-      },
-      "CodexUiPlanningContext": {
-        "additionalProperties": false,
-        "properties": {
-          "disabledText": {
-            "type": "string"
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "text": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "disabledText",
-          "enabled",
-          "text"
-        ],
-        "type": "object"
-      },
-      "CodexUiWorkflowsContext": {
-        "additionalProperties": false,
-        "properties": {
-          "enabled": {
-            "description": "The dynamic workflows setting: offers the `workflow` tool.",
-            "type": "boolean"
-          },
-          "ultracode": {
-            "description": "Ultracode is on for this thread: a standing opt-in to orchestrate with workflows.",
-            "type": "boolean"
-          },
-          "ultracodeDisabledText": {
-            "description": "Sent when Ultracode turns off after having been on.",
-            "type": "string"
-          },
-          "ultracodeText": {
-            "description": "Sent when Ultracode turns on.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "enabled",
-          "ultracode",
-          "ultracodeDisabledText",
-          "ultracodeText"
-        ],
-        "type": "object"
       },
       "CollabAgentState": {
         "properties": {
@@ -23348,7 +23348,7 @@
             "type": "object"
           },
           {
-            "description": "Codex UI experimental backend: one dynamic workflow run.",
+            "description": "Better Codex experimental backend: one dynamic workflow run.",
             "properties": {
               "agents": {
                 "default": [],

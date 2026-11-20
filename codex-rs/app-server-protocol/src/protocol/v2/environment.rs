@@ -64,9 +64,9 @@ pub struct EnvironmentAddParams {
 #[ts(export_to = "v2/")]
 pub struct EnvironmentAddResponse {}
 
-/// Codex UI: adds or replaces an environment whose exec-server is a local child process speaking
+/// Better Codex: adds or replaces an environment whose exec-server is a local child process speaking
 /// the protocol over its stdio, for example `ssh host codex exec-server --listen stdio`.
-/// Accepted only by a backend started with the Codex UI experimental backend.
+/// Accepted only by a backend started with the Better Codex experimental backend.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
@@ -88,8 +88,8 @@ pub struct EnvironmentAddStdioParams {
 #[ts(export_to = "v2/")]
 pub struct EnvironmentAddStdioResponse {}
 
-/// Codex UI: lists one directory of a configured environment's filesystem.
-/// Accepted only by a backend started with the Codex UI experimental backend.
+/// Better Codex: lists one directory of a configured environment's filesystem.
+/// Accepted only by a backend started with the Better Codex experimental backend.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]

@@ -1,0 +1,2572 @@
+/* Settings, dialog content, sign-in, cards and tags.
+   Settings follows the desktop 2.42304 settings modal (ion-dist shared-19 pA frame, Uk rail,
+   qk nav row; cc011544b SettingsNavSearch; shared-1 gx row / xx section / hx deep link).
+   The modal inherits the root density, comfortable: radius 8, control 32, icon 20,
+   pad xs 6 · sm 8 · md 12 · lg 16 · xl 24, gap xs 8 · sm 12 · md 16 · lg 28 · xl 40. */
+
+/* ---------------------------------------------------------------------------
+   Frame, 768px and up: centered (inset 0 + margin auto), calc(100dvh - 2rem) tall up to 50rem
+   and calc(100vw - 2rem) wide up to 1024px; under the desktop title bar, 100vh - 2 x inset.
+   rounded-card (radius + 4), surface-2, shadow-panel-sm, a 1px alpha-1 border in dark.
+   The dialog title is visually hidden; the close button sits on the content pane. Narrower,
+   3.1623 stacks settings into a plain dialog instead (see Narrow screens below). */
+
+@media (min-width: 768px) {
+  .dialog-backdrop:has(.settings) {
+    align-items: center;
+    padding: 0;
+  }
+
+  .dialog:has(.settings) {
+    position: relative;
+    width: calc(100vw - 2rem);
+    max-width: 1024px;
+    height: calc(100dvh - max(2rem, 2 * var(--titlebar-inset, 0px)));
+    max-height: 50rem;
+    margin: auto;
+    overflow: hidden;
+    border-radius: 12px;
+    background: var(--cds-surface-2);
+    box-shadow: var(--cds-shadow-card-ring), var(--cds-shadow-sm);
+  }
+
+  /* shared-19 pA: in the desktop app, with the rail showing, the frame may grow to 1280 x 60rem. */
+  .dialog:has(.settings[data-desktop]) {
+    max-width: max(1024px, min(1280px, calc(100vw - 6rem)));
+    max-height: max(50rem, min(60rem, calc(100dvh - 6rem)));
+  }
+
+  /* Enters from opacity 0 / scale .98 (the generic dialog uses .95). */
+  @starting-style {
+    .dialog:has(.settings) {
+      opacity: 0;
+      scale: 0.98;
+    }
+  }
+
+  .dark .dialog:has(.settings) {
+    border: 1px solid var(--cds-alpha-1);
+  }
+
+  .dialog:has(.settings) > .dialog-head {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 2;
+    padding: 0;
+  }
+
+  .dialog:has(.settings) > .dialog-head .btn {
+    margin: 0;
+  }
+
+  .dialog:has(.settings) > .dialog-head::after {
+    display: none;
+  }
+
+  .dialog:has(.settings) > .dialog-head > :first-child {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .dialog:has(.settings) > .dialog-body {
+    flex: 1;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+}
+
+.settings {
+  display: flex;
+  height: 100%;
+}
+
+/* Rail: w-48, gap-sm, border-e alpha-2, surface-1. */
+.settings-rail {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 12px;
+  width: 192px;
+  border-inline-end: 1px solid var(--cds-alpha-2);
+  background: var(--cds-surface-1);
+}
+
+.settings-search-wrap {
+  flex: none;
+  padding: 12px 12px 0;
+}
+
+/* SettingsNavSearch trigger: h-control, gap-sm, rounded, px-sm, fill-field + field ring;
+   hover (not while focused) the strong border ring, keyboard focus the focus shadow. */
+.settings-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 8px;
+  background: var(--cds-fill-field);
+  box-shadow: inset 0 0 0 1px var(--cds-fill-field-ring);
+  cursor: text;
+  transition: box-shadow var(--cds-dur-fast) ease-out;
+}
+
+.settings-search:hover:not(:focus-within) {
+  box-shadow: inset 0 0 0 1px var(--cds-border-strong);
+}
+
+.settings-search:has(:focus-visible) {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.settings-search > [data-cds="Icon"] {
+  color: var(--cds-text-muted);
+}
+
+.settings-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--cds-text-primary);
+  font-size: 14px;
+  line-height: 20px;
+  outline: none;
+}
+
+.settings-search input:focus-visible {
+  box-shadow: none;
+  outline: none;
+}
+
+.settings-search input::placeholder {
+  color: var(--cds-text-muted);
+}
+
+/* Results: a 280px non-modal popup 4px below, max-h min(320px, available), p 4. */
+.settings-search-menu {
+  width: 280px;
+  max-height: min(320px, calc(100dvh - 16px));
+  overflow-y: auto;
+}
+
+.settings-search-menu .menu-item {
+  min-height: 0;
+  padding: 6px 4px;
+}
+
+.settings-hit {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.settings-hit-name {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.settings-hit-name > [data-cds="Icon"] {
+  color: var(--cds-text-secondary);
+}
+
+.settings-hit-name > span,
+.settings-hit-via {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-hit-via {
+  padding-inline-start: calc(20px + 12px);
+  color: var(--cds-text-muted);
+  font-size: 13px;
+  line-height: 17px;
+}
+
+/* Child and "+N more" rows: indented under the page row (ps-[calc(20px+gap-sm)]). */
+.settings-hit-child {
+  flex: 1;
+  min-width: 0;
+  padding-inline-start: calc(20px + 12px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-hit-more {
+  color: var(--cds-text-muted);
+}
+
+.settings-hit mark {
+  background: none;
+  color: var(--cds-text-accent);
+}
+
+.settings-search-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 120px;
+  padding: 0 12px;
+  color: var(--cds-text-muted);
+  font-size: 14px;
+  line-height: 20px;
+  text-align: center;
+}
+
+/* Nav: groups gap-sm, each under a caption title (px-sm pt-md, muted); rows 1px apart. */
+.settings-nav {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 0 12px 12px;
+  overflow-y: auto;
+  --cds-scroll-fade-size: 24px;
+}
+
+.settings-nav-title {
+  padding: 12px 8px 0;
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.settings-nav-list {
+  display: flex;
+  flex-direction: column;
+  row-gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Nav row: h-control, gap-sm, rounded, px-sm, text-body; icon md in the control ink;
+   current row fill-ghost-selected + medium + primary. */
+.settings-tab {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: var(--cds-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+  text-align: start;
+  white-space: nowrap;
+  transition:
+    background-color var(--cds-dur-fast) ease-out,
+    color var(--cds-dur-fast) ease-out;
+}
+
+.settings-tab > [data-cds="Icon"] {
+  color: var(--cds-text-secondary);
+}
+
+/* The label: the span after the icon, which is itself a span (ui.tsx Icon). */
+.settings-tab > [data-cds="Icon"] + span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-tab:hover {
+  background: var(--cds-fill-ghost-hover);
+  color: var(--cds-text-primary);
+}
+
+.settings-tab[aria-current="page"] {
+  background: var(--cds-fill-ghost-selected);
+  color: var(--cds-text-primary);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.settings-tab:focus-visible {
+  box-shadow: var(--cds-focus-shadow);
+  outline: none;
+}
+
+/* Content pane: a header row reserved for the close button (ps-xl pe-md pt-md pb-sm
+   around a 32px control), then the scroller (px-xl pb-lg pt-2). */
+.settings-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--cds-surface-2);
+}
+
+.settings-pane-head {
+  flex: none;
+  height: 52px;
+}
+
+.settings-scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 24px 16px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+/* The real pane's sticky strip: content fades out under the header row (h-2, surface-2). */
+.settings-scroll::before {
+  content: "";
+  position: sticky;
+  top: -8px;
+  z-index: 1;
+  display: block;
+  height: 8px;
+  margin: -8px -24px 0;
+  background: linear-gradient(to bottom, var(--cds-surface-2), transparent);
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Sections and rows (shared-1 xx / gx): a section is mb-xl (no rule between sections: that
+   is the organization pages' wx) with a heading-semibold title (+ footnote description)
+   mb-md above its rows. Rows: gap-lg, py-md, 1px alpha-1 dividers; label and description
+   both text-body. */
+
+.settings-section {
+  margin-bottom: 40px;
+}
+
+.settings-section:last-child {
+  margin-bottom: 0;
+}
+
+.settings-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 28px;
+  margin-bottom: 16px;
+}
+
+.settings-section-head > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-section-title {
+  align-self: flex-start;
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+}
+
+.settings-section-desc {
+  margin: 0;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  line-height: 17px;
+}
+
+.settings-section-action {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-rows > :where(:not(:first-child)) {
+  border-top: 1px solid var(--cds-alpha-1);
+}
+
+.settings-rows > :where(:not(.settings-row)) {
+  padding-block: 12px;
+}
+
+.settings-row,
+.settings-row-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+}
+
+.settings-row {
+  padding-block: 12px;
+}
+
+/* gx `indent`: a sub-setting (ps-lg). */
+.settings-row[data-indent] {
+  padding-inline-start: 16px;
+}
+
+/* gx `below`: the row over a status or error line, gap-sm apart. */
+.settings-row-below {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.settings-row-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-row-leading {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-inline-end: -16px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-secondary);
+}
+
+.settings-row-leading img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.settings-row-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings-row-label {
+  color: var(--cds-text-primary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.settings-row-title {
+  display: inline-block;
+  vertical-align: top;
+}
+
+.settings-row-label .badge {
+  margin-inline-start: 6px;
+  vertical-align: 1px;
+}
+
+.settings-row-desc {
+  color: var(--cds-text-muted);
+  font-size: 14px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.settings-row-control {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A row whose label opens a detail page. */
+.settings-row-open {
+  text-align: start;
+}
+
+.settings-row-open:hover .settings-row-label,
+.settings-row-open:focus-visible .settings-row-label {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 3px;
+}
+
+/* Theme segments are icons (Computer / Sun / Moon) with tooltips. */
+.settings-theme-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* An icon-only segment is square (shared-frame hO: aspect-square where a labelled one takes px-md). */
+.segmented-item:has(> .settings-theme-icon) {
+  aspect-ratio: 1;
+  padding: 0;
+}
+
+/* Code themes (Bl2Tfe3A Tr: grid-cols-2 gap-md py-md, each column a select over its preview, gap-sm). */
+.settings-code-themes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--cds-gap-md);
+}
+
+.settings-code-theme {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-sm);
+  min-width: 0;
+}
+
+/* The preview (min-h-[94px] rounded-lg border; diffs at 8px in, wrapping): line numbers in 6ch
+   (min 3ch, 1ch after), then the classic +/- in the first of the line's 2ch; changed lines and
+   their numbers mixed toward the git colors in lab, light 88 / 91% of the background, dark
+   80 / 85%; the word diff 15 / 20% git color, 3px corners. Git colors and the line numbers' ink
+   follow the preview's mode, not the page's. */
+.code-preview {
+  --preview-add: #1e9e3c;
+  --preview-del: #cd2054;
+  --preview-line-mix: 88%;
+  --preview-no-mix: 91%;
+  --preview-mark-mix: 15%;
+  min-height: 94px;
+  overflow: clip;
+  padding-block: 8px;
+  border: 1px solid var(--cds-border);
+  border-radius: 8px;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font-family: var(--font-mono);
+  font-size: var(--cds-font-size-code);
+  line-height: var(--cds-leading-code);
+}
+
+.code-preview[data-code-mode="dark"] {
+  --preview-add: #32d74b;
+  --preview-del: #ff2c56;
+  --preview-line-mix: 80%;
+  --preview-no-mix: 85%;
+  --preview-mark-mix: 20%;
+}
+
+.code-preview-row {
+  --preview-git: transparent;
+  display: grid;
+  grid-template-columns: 6ch minmax(0, 1fr);
+}
+
+.code-preview-row[data-kind="add"] {
+  --preview-git: var(--preview-add);
+}
+
+.code-preview-row[data-kind="del"] {
+  --preview-git: var(--preview-del);
+}
+
+.code-preview-no {
+  padding-inline-end: 1ch;
+  color: var(--cds-text-muted);
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.code-preview-line {
+  position: relative;
+  padding-inline: 2ch 1ch;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.code-preview-row[data-kind] .code-preview-no {
+  background: color-mix(in lab, var(--code-bg) var(--preview-no-mix), var(--preview-git));
+  color: var(--preview-git);
+}
+
+.code-preview-row[data-kind] .code-preview-line {
+  background: color-mix(in lab, var(--code-bg) var(--preview-line-mix), var(--preview-git));
+}
+
+.code-preview-row[data-kind] .code-preview-line::before {
+  position: absolute;
+  inset-inline-start: 0;
+  width: 1ch;
+  color: var(--preview-git);
+}
+
+.code-preview-row[data-kind="add"] .code-preview-line::before {
+  content: "+";
+}
+
+.code-preview-row[data-kind="del"] .code-preview-line::before {
+  content: "-";
+}
+
+.code-preview mark {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--preview-git) var(--preview-mark-mix), transparent);
+  color: inherit;
+  box-decoration-break: clone;
+}
+
+/* Code font field (Bl2Tfe3A Tr: w-56). */
+.settings-code-font {
+  width: 224px;
+}
+
+/* 字体许可 (cea462098): a fullHeight lg dialog (h-dvh under its max-height) whose text, in the
+   code face and wrapped (whitespace-pre-wrap break-words text-code), scrolls under the head. */
+.dialog:has(.font-licenses) {
+  height: 100dvh;
+}
+
+.dialog-body:has(> .font-licenses) {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.font-licenses {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  font-size: var(--cds-font-size-code);
+  line-height: var(--cds-leading-code);
+}
+
+.font-licenses:focus-visible {
+  outline: none;
+  box-shadow: var(--cds-focus-shadow);
+}
+
+/* Desktop app version (CGKWOsmF bi: text-body text-primary tabular-nums). */
+.settings-version {
+  color: var(--cds-text-primary);
+  font-size: 14px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-note {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: 13px;
+  line-height: 17px;
+}
+
+.settings-section-head + .settings-note {
+  margin-bottom: 8px;
+}
+
+/* Shortcut recorder (c71860c77 Oi): 220 wide, 28 tall, px-2, r6, 1px strong outline on
+   surface-0, medium 14px, centred; focused it records with the package's brand-200 outline
+   (hsl(15 63.1% 59.6%) = clay). */
+.shortcut-field {
+  display: grid;
+  gap: 8px;
+  width: 220px;
+}
+
+.shortcut-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 120px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  outline: 1px solid var(--cds-border-strong);
+  background: var(--cds-surface-0);
+  color: var(--cds-text-primary);
+  font-size: 14px;
+  line-height: 28px;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  text-align: center;
+  user-select: none;
+}
+
+.shortcut-input > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortcut-input[data-empty] > span {
+  color: var(--cds-text-muted);
+}
+
+.shortcut-input:focus,
+.shortcut-input:focus-visible {
+  outline: 2px solid var(--cds-clay);
+  box-shadow: inset 0 1px 4px 2px rgb(0 0 0 / 12%);
+}
+
+.shortcut-clear {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  display: grid;
+  color: var(--cds-text-muted);
+}
+
+.shortcut-clear:hover {
+  color: var(--cds-text-secondary);
+}
+
+.shortcut-error {
+  color: var(--cds-text-danger);
+  font-size: 13px;
+  line-height: 17px;
+}
+
+.settings-back {
+  margin: -4px 0 12px -8px;
+}
+
+/* ---------------------------------------------------------------------------
+   Deep link (W20, census 7777-7779): a wavy fill-warning underline draws under the
+   row title, the row gets a 22% wash; 1.95s, then both fade. */
+
+.feature-anchor-highlight {
+  position: relative;
+}
+
+.feature-anchor-highlight::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -4px;
+  height: 5px;
+  pointer-events: none;
+  background: var(--cds-fill-warning, #fab219);
+  clip-path: inset(0 100% 0 0);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 2.5Q2 .75 4 2.5T8 2.5' fill='none' stroke='%23000' stroke-width='1.3' stroke-linecap='round'/%3E%3C/svg%3E") 0 0 / 8px 5px repeat-x;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 2.5Q2 .75 4 2.5T8 2.5' fill='none' stroke='%23000' stroke-width='1.3' stroke-linecap='round'/%3E%3C/svg%3E") 0 0 / 8px 5px repeat-x;
+  animation: feature-anchor-highlight-underline 1.95s ease-out forwards;
+}
+
+.feature-anchor-highlight:where(:root[dir="rtl"] :dir(rtl))::after {
+  clip-path: inset(0 0 0 100%);
+  animation-name: feature-anchor-highlight-underline-rtl;
+}
+
+.feature-anchor-row-fill {
+  position: relative;
+  isolation: isolate;
+}
+
+.feature-anchor-row-fill::before {
+  content: "";
+  position: absolute;
+  inset: 4px -4px;
+  z-index: -1;
+  border-radius: 6px;
+  pointer-events: none;
+  opacity: 0;
+  background: color-mix(in srgb, var(--cds-fill-warning, #fab219) 22%, transparent);
+  animation: feature-anchor-row-fill-wash 1.95s ease-out forwards;
+}
+
+@keyframes feature-anchor-highlight-underline {
+  0% { clip-path: inset(0 100% 0 0); opacity: 1; }
+  17.9% { clip-path: inset(0); opacity: 1; }
+  53.8% { clip-path: inset(0); opacity: 1; }
+  to { clip-path: inset(0); opacity: 0; }
+}
+
+@keyframes feature-anchor-highlight-underline-rtl {
+  0% { clip-path: inset(0 0 0 100%); opacity: 1; }
+  17.9% { clip-path: inset(0); opacity: 1; }
+  53.8% { clip-path: inset(0); opacity: 1; }
+  to { clip-path: inset(0); opacity: 0; }
+}
+
+@keyframes feature-anchor-row-fill-wash {
+  0% { opacity: 0; }
+  17.9% { opacity: 1; }
+  53.8% { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* Reduced motion: both show statically; highlightSetting() removes them after 2050ms. */
+@media (prefers-reduced-motion: reduce) {
+  .feature-anchor-highlight::after { clip-path: inset(0); opacity: 1; animation: none; }
+  .feature-anchor-row-fill::before { opacity: 1; animation: none; }
+}
+
+:root[data-reduce-motion="true"] .feature-anchor-highlight::after { clip-path: inset(0); opacity: 1; animation: none; }
+:root[data-reduce-motion="true"] .feature-anchor-row-fill::before { opacity: 1; animation: none; }
+
+/* ---------------------------------------------------------------------------
+   Usage */
+
+.limit-card,
+.stat-tile,
+.usage-chart {
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-surface-2);
+  box-shadow: var(--cds-shadow-card-ring);
+}
+
+.limit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px;
+}
+
+.limit-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+}
+
+.limit-name {
+  font-size: 14px;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.usage-dashboard {
+  display: grid;
+  gap: 12px;
+}
+
+/* Hero figure: one per view, the serif voice at >= 48px with lining tabular digits. */
+.usage-hero-value {
+  font-family: var(--font-voice);
+  font-size: 48px;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.usage-hero-label {
+  margin-top: 4px;
+  color: var(--cds-text-muted);
+  font-size: 13px;
+}
+
+.stat-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.stat-tile {
+  padding: 10px 12px;
+}
+
+.stat-label {
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.stat-value {
+  margin-top: 2px;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+  font-variation-settings: var(--cds-font-wght-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-chart {
+  margin: 0;
+  padding: 12px 14px 10px;
+}
+
+.usage-chart-title {
+  margin-bottom: 14px;
+  color: var(--cds-text-secondary);
+  font-size: 13px;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.usage-plot {
+  position: relative;
+  height: 132px;
+  margin-left: 40px;
+}
+
+.usage-grid {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.usage-gridline {
+  position: relative;
+  height: 0;
+  border-top: 1px solid var(--cds-alpha-1);
+}
+
+.usage-gridline:last-child {
+  border-top-color: var(--cds-border);
+}
+
+.usage-gridline span {
+  position: absolute;
+  top: -7px;
+  right: calc(100% + 8px);
+  color: var(--cds-text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 14px;
+}
+
+/* One column per day of the range (set inline). */
+.usage-bars {
+  position: absolute;
+  inset: 0;
+  display: grid;
+}
+
+/* The whole column is the hit target; the bar caps at 24px and leaves air. */
+.usage-col {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 100%;
+}
+
+.usage-day {
+  position: relative;
+  width: min(72%, 24px);
+  border-radius: 4px 4px 0 0;
+  background: var(--cds-chart-1);
+  transition: filter var(--cds-dur-fast) var(--cds-ease-out);
+}
+
+.usage-col.hover .usage-day {
+  filter: brightness(1.15);
+}
+
+.usage-peak {
+  position: absolute;
+  bottom: calc(100% + 3px);
+  left: 50%;
+  translate: -50% 0;
+  color: var(--cds-text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.usage-tip {
+  position: absolute;
+  top: -8px;
+  z-index: 2;
+  display: grid;
+  gap: 1px;
+  padding: 4px 8px;
+  translate: -50% -100%;
+  border-radius: 6px;
+  background: var(--cds-tooltip-bg);
+  color: var(--cds-tooltip-fg);
+  box-shadow: var(--cds-shadow-sm);
+  font-size: 12px;
+  line-height: 17px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.usage-tip strong {
+  font-size: 13px;
+  font-weight: 600;
+  font-variation-settings: var(--cds-font-wght-semibold);
+}
+
+.usage-tip span {
+  color: var(--cds-text-muted);
+}
+
+.usage-axis {
+  display: flex;
+  justify-content: space-between;
+  margin: 6px 0 0 40px;
+  color: var(--cds-text-muted);
+  font-size: 11px;
+}
+
+/* ---------------------------------------------------------------------------
+   About (W15 SB:8429-8444, the 320 x 428 "About" child window as a settings page the
+   desktop shell's 关于 Codex opens; not in the rail): 64px r14 tile with the mark, serif
+   24/medium title, 13px muted version line that copies itself, w-full px-16 mt-24 gap-16
+   button column. */
+
+.about-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(320px, 100%);
+  margin: 0 auto 40px;
+  padding-top: 32px;
+  text-align: center;
+}
+
+.about-icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+  /* The Codex mark is monochrome; #d97757 is Claude's clay and stays out of this app. */
+  background: var(--cds-text-primary);
+  color: var(--cds-page-bg);
+}
+
+.about-title {
+  margin: 24px 0 0;
+  font-family: var(--font-voice);
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.about-version {
+  margin-top: 8px;
+  color: var(--cds-text-muted);
+  font-size: 13px;
+  line-height: 18px;
+  transition: color var(--cds-dur-fast) ease-out;
+}
+
+.about-version:hover {
+  color: var(--cds-text-secondary);
+}
+
+.about-built {
+  margin: 4px 0 0;
+  color: var(--cds-text-muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.about-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  margin-top: 24px;
+  padding: 0 64px;
+}
+
+.about-btn {
+  display: block;
+  padding: 7px 14px;
+  border-radius: 8px;
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-primary);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  text-decoration: none;
+  transition: background-color var(--cds-dur-fast) ease-out;
+}
+
+.about-btn:hover {
+  background: var(--cds-alpha-2);
+}
+
+.dark .about-btn {
+  background: rgb(255 255 255 / 10%);
+}
+
+.dark .about-btn:hover {
+  background: rgb(255 255 255 / 14%);
+}
+
+.about-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------------------
+   Memory (W21 SB:8954-8965): files on the left come in 30ms apart (.2s, 4px rise),
+   the right detail re-enters the same way when the pick changes. */
+
+.memory-panel {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: 8px;
+  height: 420px;
+  padding: 8px;
+  border-radius: var(--cds-radius-card);
+  box-shadow: inset 0 0 0 1px var(--cds-alpha-2);
+}
+
+.memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.memory-item {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: var(--cds-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+  text-align: start;
+  animation: cds-reveal-in 0.2s ease-out calc(var(--i, 0) * 30ms) backwards;
+}
+
+.memory-item:hover {
+  background: var(--cds-alpha-1);
+}
+
+.memory-item[aria-current="true"] {
+  background: var(--cds-fill-ghost-selected);
+  color: var(--cds-text-primary);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.memory-item > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-item > small {
+  color: var(--cds-text-muted);
+  font-size: 12px;
+  line-height: 17px;
+  font-weight: 400;
+  font-variation-settings: var(--cds-font-wght-regular);
+}
+
+.memory-detail {
+  min-width: 0;
+  min-height: 0;
+  padding: 12px 16px;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: var(--cds-surface-1);
+  animation: cds-reveal-in 0.2s ease-out backwards;
+}
+
+.memory-detail .markdown {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* Plugin detail header. */
+.plugin-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.plugin-head .settings-row-leading {
+  width: 48px;
+  height: 48px;
+  margin: 0;
+  border-radius: 12px;
+}
+
+.plugin-head-text {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+}
+
+.plugin-head-title {
+  margin: 0;
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+}
+
+.plugin-search {
+  width: 220px;
+}
+
+/* No remote logos (CSP img-src is local): the brand color carries the initial. */
+.plugin-tile {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  font-variation-settings: var(--cds-font-wght-semibold);
+}
+
+.plugin-desc {
+  margin: 0 0 16px;
+  white-space: pre-line;
+}
+
+/* ---------------------------------------------------------------------------
+   Connectors (c40525e86 mo). Header (ccefd43d9 S in the dialog): the title and the 我的 / 发现
+   control gap-md apart; search (w-64), filter and 添加 gap-xs apart at the end; h-6 to the list. */
+
+.connectors-head {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  min-height: var(--cds-h-control);
+  margin-bottom: 24px;
+}
+
+.connectors-head-start {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--cds-gap-md);
+}
+
+.connectors-title {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-title);
+  line-height: var(--cds-leading-title);
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+  white-space: nowrap;
+}
+
+.connectors-head-end {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--cds-gap-xs);
+  margin-inline-start: auto;
+}
+
+/* TextInput type=search with a Search start slot and a clear button (清除搜索). */
+.connectors-search {
+  width: 256px;
+  min-width: 120px;
+  flex: 0 1 auto;
+  gap: var(--cds-gap-xs);
+}
+
+.connectors-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.connectors-search-clear {
+  display: grid;
+  flex: none;
+  place-items: center;
+  color: var(--cds-text-muted);
+}
+
+.connectors-search-clear:hover {
+  color: var(--cds-text-secondary);
+}
+
+/* c3c3eda79 dt: the trigger takes the accent while a filter is on. */
+.connectors-filter-on {
+  color: var(--cds-text-accent);
+}
+
+/* c51c45b79: table-fixed, outset by pad-md so the cell text lines up with the page; th h-control
+   footnote medium secondary over a 1px rule; td h-7 + py-sm, its rule hidden while hovered. */
+.connectors-table {
+  width: calc(100% + 2 * var(--cds-pad-md));
+  min-width: 576px;
+  margin: 0 calc(-1 * var(--cds-pad-md));
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  white-space: nowrap;
+}
+
+.connectors-table th {
+  height: var(--cds-h-control);
+  padding: 0 var(--cds-pad-md);
+  overflow: hidden;
+  border-bottom: 1px solid var(--cds-border);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  text-align: start;
+  text-overflow: ellipsis;
+}
+
+.connectors-table .connectors-col {
+  width: 160px;
+}
+
+.connectors-table td {
+  box-sizing: content-box;
+  height: 28px;
+  padding: var(--cds-pad-sm) var(--cds-pad-md);
+  overflow: hidden;
+  border-bottom: 1px solid var(--cds-border);
+  text-overflow: ellipsis;
+}
+
+.connectors-table tbody tr {
+  cursor: pointer;
+  outline: none;
+}
+
+.connectors-table tbody tr:is(:hover, :focus-visible) td {
+  border-bottom-color: transparent;
+  background: var(--cds-fill-ghost-hover);
+}
+
+.connectors-table tbody tr:has(+ tr:is(:hover, :focus-visible)) td {
+  border-bottom-color: transparent;
+}
+
+.connectors-table tbody tr:is(:hover, :focus-visible) td:first-child {
+  border-start-start-radius: var(--cds-radius);
+  border-end-start-radius: var(--cds-radius);
+}
+
+.connectors-table tbody tr:is(:hover, :focus-visible) td:last-child {
+  border-start-end-radius: var(--cds-radius);
+  border-end-end-radius: var(--cds-radius);
+}
+
+.connectors-table tbody tr:focus-visible td {
+  box-shadow: inset 0 2px 0 var(--cds-border-accent), inset 0 -2px 0 var(--cds-border-accent);
+}
+
+.connectors-table tbody tr:focus-visible td:first-child {
+  box-shadow: inset 2px 2px 0 var(--cds-border-accent), inset 0 -2px 0 var(--cds-border-accent);
+}
+
+.connectors-table tbody tr:focus-visible td:last-child {
+  box-shadow: inset -2px 2px 0 var(--cds-border-accent), inset 0 -2px 0 var(--cds-border-accent);
+}
+
+.connectors-name {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+}
+
+.connectors-name-text {
+  display: grid;
+  min-width: 0;
+}
+
+.connectors-name-label,
+.connectors-name-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.connectors-name-sub {
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+/* shared-7 rk: a surface-3 tile, radius 0.27 × size, border + shadow-sm, the logo contained. */
+.connector-tile {
+  --tile: 24px;
+  --tile-image: 16px;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--tile);
+  height: var(--tile);
+  overflow: hidden;
+  border-radius: calc(var(--tile) * 0.27);
+  background: var(--cds-surface-3);
+  box-shadow: inset 0 0 0 1px var(--cds-border), var(--cds-shadow-sm);
+  color: var(--cds-text-muted);
+}
+
+.connector-tile img {
+  width: var(--tile-image);
+  height: var(--tile-image);
+  object-fit: contain;
+}
+
+.connector-tile-md {
+  --tile: 28px;
+  --tile-image: 20px;
+  margin-top: 4px;
+  border-radius: 6px;
+}
+
+.connector-tile-lg {
+  --tile: 56px;
+  --tile-image: 40px;
+}
+
+.connectors-type,
+.connectors-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+  color: var(--cds-text-secondary);
+}
+
+.connectors-status {
+  height: 28px;
+}
+
+.connectors-warning {
+  display: inline-flex;
+  color: var(--cds-text-warning);
+}
+
+.connectors-none {
+  margin: 0;
+  padding: var(--cds-gap-lg) 0;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  text-align: center;
+}
+
+/* c27f32a39 st: the first-run card (bg-neutral), heading + body gap-xs over a primary button. */
+.connectors-first-run {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--cds-gap-md);
+  padding: var(--cds-pad-lg);
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-bg-neutral);
+}
+
+.connectors-first-run-text {
+  display: grid;
+  gap: var(--cds-gap-xs);
+}
+
+.connectors-first-run h3 {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-heading);
+  line-height: var(--cds-leading-heading);
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+}
+
+.connectors-first-run p,
+.connectors-error p {
+  margin: 0;
+  color: var(--cds-text-secondary);
+}
+
+.connectors-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--cds-gap-md);
+  padding: var(--cds-gap-xl) var(--cds-pad-md);
+  text-align: center;
+}
+
+.connectors-more {
+  padding-top: var(--cds-gap-xs);
+}
+
+/* Fa: ruled rows in auto-fill 340px columns gap-x-10; each row a hover card outset 16px, the rule
+   starting past the 28px logo + gap-3.5 and hidden on hover and after the last row. */
+.connectors-directory {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
+  column-gap: 40px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.connectors-directory li {
+  position: relative;
+}
+
+.connectors-directory li::after {
+  content: "";
+  position: absolute;
+  inset-inline: calc(28px + 14px) 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--cds-border);
+}
+
+.connectors-directory li:last-child::after,
+.connectors-directory li:hover::after {
+  display: none;
+}
+
+.connectors-directory-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin: 0 -16px;
+  padding: 12px 16px;
+  border-radius: var(--cds-radius-card);
+  color: inherit;
+  text-decoration: none;
+}
+
+.connectors-directory-row:hover {
+  background: var(--cds-bg-neutral);
+}
+
+.connectors-directory-text {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.connectors-directory-name {
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.connectors-directory-desc {
+  display: -webkit-box;
+  margin-top: -1px;
+  overflow: hidden;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.connectors-directory-meta {
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  line-height: 16px;
+}
+
+/* The connector's page (c08e79e85 Tn): a min-h-14 header (24px logo gap-3, font-large-bold name,
+   badges; 断开连接 and ⋯ at the end), the description, the copyable server URL, local config, tools. */
+.connector-page {
+  padding-bottom: 24px;
+}
+
+.connector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cds-gap-sm);
+  min-height: 56px;
+  margin-bottom: var(--cds-gap-md);
+}
+
+.connector-head-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+}
+
+.connector-title {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-heading);
+  line-height: var(--cds-leading-heading);
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+  overflow-wrap: anywhere;
+}
+
+.connector-head-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--cds-gap-xs);
+}
+
+.connector-desc {
+  margin: 0 0 var(--cds-gap-xs);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+}
+
+.connector-url {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
+  text-align: start;
+  transition: color var(--cds-dur-fast) ease-out;
+}
+
+.connector-url:hover {
+  color: var(--cds-text-secondary);
+}
+
+.connector-url-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* c2e7fd468: collapsibles space-y-4, a font-small-bold trigger over a surface-1 mono block. */
+.connector-configs {
+  display: grid;
+  gap: var(--cds-gap-md);
+  margin-top: var(--cds-gap-md);
+}
+
+.connector-config summary {
+  display: flex;
+  align-items: center;
+  gap: var(--cds-gap-sm);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-caption);
+  line-height: var(--cds-leading-caption);
+  font-weight: var(--cds-font-weight-semibold);
+  font-variation-settings: var(--cds-font-wght-semibold);
+  list-style: none;
+  cursor: pointer;
+}
+
+.connector-config summary::-webkit-details-marker {
+  display: none;
+}
+
+.connector-config-code {
+  display: block;
+  margin-top: 4px;
+  padding: 4px 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--cds-surface-1);
+  color: var(--cds-text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--cds-font-size-code);
+  line-height: var(--cds-leading-code);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.connector-config-line {
+  display: block;
+}
+
+.connector-config-key {
+  color: var(--cds-text-secondary);
+}
+
+.connector-tools-loading {
+  display: flex;
+  min-height: 96px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 24px;
+}
+
+.connector-tools-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--cds-gap-xs);
+  margin-top: 24px;
+  color: var(--cds-text-muted);
+}
+
+.connector-tools-error > [data-cds="Icon"] {
+  flex: none;
+  margin-top: 2px;
+  color: var(--cds-text-danger);
+}
+
+.connector-tools-error p,
+.connector-no-tools {
+  margin: 0;
+}
+
+.connector-no-tools {
+  margin-top: 24px;
+  color: var(--cds-text-muted);
+}
+
+/* Tool permissions (c4ac4d9d6): the legend and its muted line gap-2; groups ruled border-b with a
+   py-2 head (caret, title, count, the group's blanket permission); tool rows min-h-14 ps-6. */
+.connector-tools {
+  display: flex;
+  flex-direction: column;
+  margin-top: 24px;
+}
+
+.connector-tools-head {
+  display: grid;
+  gap: 8px;
+}
+
+.connector-tools-head h3 {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.connector-tools-head p {
+  margin: 0;
+  color: var(--cds-text-muted);
+}
+
+.connector-tool-group {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--cds-border);
+}
+
+.connector-tool-group:last-child,
+.connector-tool:last-child {
+  border-bottom: 0;
+}
+
+.connector-tool-group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+}
+
+.connector-tool-group-toggle {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  text-align: start;
+}
+
+.connector-tool-group-toggle > [data-cds="Icon"] {
+  color: var(--cds-text-secondary);
+  transition: transform var(--cds-dur-base, 0.2s) ease;
+}
+
+.connector-tool-group-toggle > .connector-caret-closed {
+  transform: rotate(-90deg);
+}
+
+.connector-tool {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 56px;
+  padding: 8px 0 8px 24px;
+  border-bottom: 1px solid var(--cds-border);
+}
+
+.connector-tool-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+  line-height: var(--cds-leading-body);
+  overflow-wrap: anywhere;
+}
+
+.connector-tool-blocked {
+  opacity: 0.5;
+}
+
+/* Not connected: the centred page, the 56px logo over the name, the reason and 连接. */
+.connector-page-off {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--cds-gap-md);
+  padding-top: var(--cds-gap-xl);
+  text-align: center;
+}
+
+.connector-page-menu {
+  position: absolute;
+  top: 0;
+  inset-inline-end: 0;
+}
+
+.connector-off-text {
+  display: grid;
+  gap: var(--cds-gap-xs);
+  padding: 0 24px;
+}
+
+.connector-off-text p {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-heading);
+  line-height: var(--cds-leading-heading);
+}
+
+.connector-off-config {
+  width: 100%;
+  max-width: 448px;
+  text-align: start;
+}
+
+/* ce99eb202 fields: label, input, then the help line (the error in its place). */
+.connector-field {
+  display: grid;
+  gap: 6px;
+}
+
+.connector-field-label {
+  color: var(--cds-text-primary);
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.connector-field-help,
+.connector-field-error {
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.connector-field-error {
+  color: var(--cds-text-danger);
+}
+
+/* Share dialog (c5e7d44b0 k): footnote headings over card-ring groups, 20px apart. */
+.share-body {
+  display: grid;
+  gap: 20px;
+}
+
+.share-group {
+  display: grid;
+  gap: 8px;
+}
+
+.share-heading {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: var(--cds-font-size-footnote);
+  font-weight: inherit;
+  font-variation-settings: inherit;
+  line-height: var(--cds-leading-footnote);
+}
+
+/* People with access: rows of min-h-10 / py-1.5 / px-sm under hairlines, 20rem at most. */
+.share-people {
+  display: grid;
+  max-height: min(20rem, 40dvh);
+  overflow-y: auto;
+  border-radius: var(--cds-radius-card);
+  box-shadow: var(--cds-shadow-card-ring);
+}
+
+.share-person {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 6px var(--cds-pad-sm);
+}
+
+.share-person + .share-person {
+  border-top: 1px solid var(--cds-border);
+}
+
+.share-avatar {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--cds-alpha-2);
+  font-size: 11px;
+  font-weight: 600;
+  font-variation-settings: var(--cds-font-wght-semibold);
+}
+
+.share-person-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.share-muted {
+  color: var(--cds-text-muted);
+}
+
+/* General access (c5e7d44b0 A): the level's icon and its menu trigger on a card ring, p-sm. */
+.share-access {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--cds-pad-sm);
+  border-radius: var(--cds-radius-card);
+  box-shadow: var(--cds-shadow-card-ring);
+}
+
+.share-access-icon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  color: var(--cds-text-secondary);
+}
+
+.share-stop {
+  margin-inline-end: auto;
+}
+
+/* ---------------------------------------------------------------------------
+   Dialog content: review targets, folder picker, section swatches, feedback, rewind quote */
+
+.choice-list {
+  display: grid;
+  gap: 8px;
+}
+
+.choice-card {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--cds-radius-card);
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+  transition:
+    background-color var(--cds-dur-fast) ease-out,
+    box-shadow var(--cds-dur-fast) ease-out;
+}
+
+.choice-card:hover {
+  background: var(--cds-alpha-1);
+}
+
+.choice-card.selected {
+  box-shadow: inset 0 0 0 1px var(--cds-fill-accent);
+}
+
+.choice-card:has(input[type="radio"]:focus-visible) {
+  box-shadow: var(--cds-focus-shadow);
+}
+
+.choice-card input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.choice-icon {
+  padding-top: 1px;
+  color: var(--cds-text-secondary);
+}
+
+.choice-text {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.choice-label {
+  font-size: 14px;
+  font-weight: 500;
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.choice-hint {
+  color: var(--cds-text-muted);
+  font-size: 13px;
+  line-height: 17px;
+}
+
+.choice-text .input {
+  margin-top: 6px;
+}
+
+.path-bar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.folder-list {
+  display: grid;
+  align-content: start;
+  height: 320px;
+  padding: 4px;
+  overflow-y: auto;
+  border-radius: var(--cds-radius-card);
+  box-shadow: inset 0 0 0 1px var(--cds-border);
+}
+
+.folder-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 14px;
+  text-align: left;
+}
+
+.folder-item:hover {
+  background: var(--df-hover);
+}
+
+.folder-item [data-cds="Icon"] {
+  color: var(--cds-text-muted);
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 8%);
+  transition:
+    transform var(--cds-dur-base) var(--cds-ease-overshoot),
+    box-shadow var(--cds-dur-snap) var(--cds-ease-out);
+}
+
+.swatch:hover {
+  transform: scale(1.1);
+}
+
+.swatch[aria-checked="true"] {
+  box-shadow:
+    0 0 0 2px var(--cds-surface-2),
+    0 0 0 3.5px var(--cds-text-primary);
+}
+
+.swatch-none {
+  background: linear-gradient(135deg, transparent 46%, var(--cds-text-muted) 46% 54%, transparent 54%), var(--cds-surface-2);
+  box-shadow: inset 0 0 0 1px var(--cds-border-strong);
+}
+
+.dialog-stack {
+  display: grid;
+  gap: 12px;
+}
+
+/* The message being rewound to (cc43287c9 _7): a neutral card, heading size, two lines at most. */
+.rewind-quote {
+  padding: var(--cds-pad-md) var(--cds-pad-lg);
+  border-radius: var(--cds-radius-card);
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-primary);
+  font-size: var(--cds-font-size-heading);
+  line-height: var(--cds-leading-heading);
+}
+
+.rewind-quote p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* A Codex-only caveat under the dialog content (footnote, secondary). */
+.dialog-note {
+  margin: var(--cds-gap-sm) 0 0;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-footnote);
+  line-height: var(--cds-leading-footnote);
+}
+
+.feedback-logs {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.feedback-logs .settings-row-desc {
+  font-size: 13px;
+  line-height: 17px;
+}
+
+/* ---------------------------------------------------------------------------
+   Sign-in. Desktop shell (ca8113618 Hn): fixed over the window, p-8, content centred
+   (safe) under the chrome bar's drag strip. Start page (c632c9594 xm): a 72px mark
+   mb-12, "Codex for Windows" serif 30/36 medium, 开始使用 pinned bottom-12 start-20
+   end-20 max-w-md. A step: the title (B) serif 30/36 medium mb-8 over a card (nm: mt-8
+   mx-4 sm:mx-auto p-7 max-w-sm sm:min-w-xs, r32, .5px border, four soft shadows,
+   surface-1, centred), a mt-lg link under it. Waiting on the browser (tm): a 48px
+   spinner, a serif 24 status title, a balanced 14px hint or the mono device code, back.
+   A browser keeps the W11 /login frame: a 72px nav (84 from 69rem) and the title as a
+   serif 56/64.4 hero (login-hero-in belongs to the hero media, which better-codex has none of). */
+
+.login {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.login[data-desktop] {
+  position: fixed;
+  inset: 0;
+  align-items: center;
+  justify-content: safe center;
+  padding: 32px;
+  background: var(--cds-page-bg);
+}
+
+.login-nav {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 72px;
+  padding: 0 24px;
+}
+
+@media (min-width: 69rem) {
+  .login-nav {
+    height: 84px;
+  }
+}
+
+.login-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-voice);
+  font-size: 20px;
+  line-height: 20px;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+}
+
+.login-brand svg,
+.login-splash-mark {
+  color: var(--cds-clay);
+}
+
+.login-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 24px 64px;
+}
+
+.login-splash-mark {
+  flex: none;
+  margin-bottom: 48px;
+}
+
+.login-platform,
+.login-title {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-family: var(--font-voice);
+  font-size: 30px;
+  line-height: 36px;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  text-align: center;
+}
+
+.login-platform em {
+  font-style: italic;
+}
+
+.login-title {
+  margin-bottom: 32px;
+}
+
+.login:not([data-desktop]) .login-title {
+  margin-bottom: 0;
+  font-size: 56px;
+  line-height: 64.4px;
+  font-weight: 330;
+  font-variation-settings: normal;
+}
+
+.login-splash-foot {
+  position: absolute;
+  bottom: 48px;
+  inset-inline: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 448px;
+  margin-inline: auto;
+}
+
+.login-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 384px;
+  margin: 32px 16px 0;
+  padding: 28px;
+  border: 0.5px solid var(--cds-border);
+  border-radius: 32px;
+  background: var(--cds-surface-1);
+  box-shadow:
+    0 4px 24px rgb(0 0 0 / 1.57%),
+    0 4px 32px rgb(0 0 0 / 1.57%),
+    0 2px 64px rgb(0 0 0 / 1.18%),
+    0 16px 32px rgb(0 0 0 / 1.18%);
+  text-align: center;
+}
+
+@media (min-width: 640px) {
+  .login-card {
+    min-width: 320px;
+    margin-inline: auto;
+  }
+}
+
+.login-splash-foot > .btn,
+.login-card > .btn,
+.login-key > .btn {
+  width: 100%;
+}
+
+.login-body {
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: 14.5px;
+  line-height: 1.625;
+  text-wrap: balance;
+}
+
+.login-key {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* nm's alert, in the danger colours. */
+.login-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0.5px solid color-mix(in srgb, var(--cds-fill-danger) 25%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--cds-fill-danger) 8%, transparent);
+  color: var(--cds-text-danger);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: start;
+}
+
+.login-alert > [data-cds="Icon"] {
+  margin-top: 1px;
+}
+
+.login-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  color: var(--cds-text-secondary);
+  font-size: 14px;
+  line-height: 20px;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  transition: color var(--cds-dur-fast) ease-out;
+}
+
+.login-link:hover {
+  color: var(--cds-text-primary);
+}
+
+.login-switch {
+  margin-top: 28px;
+}
+
+.login-wait {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  width: 100%;
+  text-align: center;
+}
+
+.login-wait-title {
+  margin: 0;
+  color: var(--cds-text-primary);
+  font-family: var(--font-voice);
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: var(--cds-font-weight-medium);
+  font-variation-settings: var(--cds-font-wght-medium);
+  letter-spacing: -0.025em;
+}
+
+.login-hint {
+  max-width: 384px;
+  margin: 0;
+  color: var(--cds-text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+  text-wrap: balance;
+}
+
+.login-wait > .login-alert {
+  max-width: 384px;
+}
+
+.login-code {
+  padding: 8px 16px;
+  border: 0.5px solid var(--cds-border);
+  border-radius: 8px;
+  background: var(--cds-surface-3);
+  color: var(--cds-text-primary);
+  font-family: var(--font-mono);
+  font-size: 24px;
+  line-height: 32px;
+  letter-spacing: 0.3em;
+}
+
+.login-back {
+  margin-top: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+   Cards and tags (settings) */
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.tag {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--cds-alpha-1);
+  color: var(--cds-text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* ---------------------------------------------------------------------------
+   Narrow screens. At <= 767px 3.1623 stacks settings into a plain dialog (shared-46 Kh →
+   shared-19 eg `stacked`: Dialog.Popup size lg, fullHeight; Dialog.Header 设置 with its close
+   button), so the generic .dialog / .dialog-head / .dialog-body apply here: 720 wide, the
+   window's height less the dialog's margins, the whole popup scrolling under its fades in p-xl.
+   Under the header the pages are a row of text tabs in a pb-md strip (shared-46 Lh: Tabs.List,
+   -mx-px px-px, scroll-fade-x, no scrollbar; shared-10 Tabs: h-control px-md body medium muted,
+   the current one primary on fill-ghost-hover); a page neither scrolls nor pads on its own
+   (cc011544b jn popupScrolls). */
+
+@media (max-width: 767px) {
+  .dialog:has(.settings) {
+    --dialog-w: 720px;
+    height: 100dvh;
+  }
+
+  .settings {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .settings-rail {
+    width: auto;
+    gap: 0;
+    border-inline-end: 0;
+    background: none;
+  }
+
+  .settings-search-wrap,
+  .settings-nav-title,
+  .settings-tab > [data-cds="Icon"],
+  .settings-pane-head {
+    display: none;
+  }
+
+  .settings-nav {
+    flex-direction: row;
+    gap: 2px;
+    margin-inline: -1px;
+    padding: 0 1px var(--cds-pad-md);
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .settings-pane {
+    background: none;
+  }
+
+  .settings-scroll {
+    padding: 0;
+    overflow: visible;
+    scrollbar-gutter: auto;
+  }
+
+  .settings-scroll::before {
+    display: none;
+  }
+
+  .settings-nav-list {
+    flex-direction: row;
+    gap: 2px;
+  }
+
+  .settings-tab {
+    width: auto;
+    padding: 0 12px;
+    color: var(--cds-text-muted);
+    font-weight: var(--cds-font-weight-medium);
+    font-variation-settings: var(--cds-font-wght-medium);
+  }
+
+  .settings-tab[aria-current="page"] {
+    background: var(--cds-fill-ghost-hover);
+    color: var(--cds-text-primary);
+  }
+
+  .stat-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-row,
+  .settings-row-main {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  /* A wrapped control (工作树位置's path and keys) is held to the row, not its own width. */
+  .settings-row-control {
+    max-width: 100%;
+  }
+
+  .memory-panel {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .memory-list {
+    max-height: 200px;
+  }
+}
+
+/* cc43287c9 x_e: 恢复 above its select, then the files it touches and the shell caveat. */
+.rewind-restore {
+  display: grid;
+  gap: var(--cds-gap-xs);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+}
+
+.rewind-files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cds-gap-xs);
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-body);
+}
+
+.rewind-files[data-hidden] {
+  visibility: hidden;
+}
+
+.rewind-files-note {
+  color: var(--cds-text-muted);
+}
+
+/* 工作树位置: the folder (its full path on hover), then its keys. */
+.settings-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 420px;
+}
+
+.settings-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--cds-text-secondary);
+  font-size: var(--cds-font-size-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 存储 (SettingsStorage.tsx): sizes as the version row reads, and the cleanup dialog's column. */
+.settings-value {
+  color: var(--cds-text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.settings-error {
+  margin: 0;
+  color: var(--cds-text-danger);
+}
+
+.storage-clean {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

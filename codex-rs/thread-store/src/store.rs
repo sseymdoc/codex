@@ -295,7 +295,7 @@ pub trait ThreadStore: Any + Send + Sync {
         })
     }
 
-    /// Codex UI experimental backend: switches a reverted thread's rollout pointer from `from` to
+    /// Better Codex experimental backend: switches a reverted thread's rollout pointer from `from` to
     /// `to`, returning false when the thread no longer points at `from`.
     ///
     /// Callers must close the thread's live writer first.
