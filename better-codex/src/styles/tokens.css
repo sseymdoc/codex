@@ -1426,9 +1426,11 @@
   animation-iteration-count: 1 !important;
 }
 
-/* 代码字号 (Settings.tsx applyCodeSize): over every density's own code size. */
-:root[data-code-size],
-:root[data-code-size] [data-density] {
+/* 代码字号 (Settings.tsx applyCodeSize): over every density's own code size, on what its description
+   names (code blocks, diffs, command output and the code previews; open files in pages.css, the
+   terminal in Terminal.tsx). Chips, paths and settings fields keep the density's size. */
+:root[data-code-size]
+  :is(.md-code, .code-pre, .diff, .code-preview, .tool-card-main, .tool-arg-key, .tool-arg-code, .user-shell-output pre, .bg-task-code, .approval-command, .approval-sent-value.code, .approval-script-code) {
   --cds-font-size-code: var(--code-size-override);
   --cds-leading-code: var(--code-leading-override);
 }

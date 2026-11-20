@@ -35,7 +35,7 @@ const SPEC = [
   tool("list_groups", "List the user's custom sidebar groups, in sidebar order: a JSON array of {id, name, session_count, order}. Use the ids with move_sessions / rename_group / delete_group.",
     {}, [], read, ["listed"], json),
   tool("create_group", "Create a custom sidebar group and return its id. It starts empty; file sessions into it with move_sessions. Use the name the user asked for, and prefer an existing group (list_groups) over a near-duplicate.",
-    { name: NAME }, ["name"], change, ["created"],
+    { name: NAME }, ["name"], { ...change, idempotentHint: false }, ["created"],
     (args, r) => `Created the group ${quote(args.name)} (id ${r.data?.id}).`),
   tool("rename_group", "Rename a custom sidebar group. Asks the user first, except in full access.",
     { group_id: ID, name: NAME }, ["group_id", "name"], change, ["renamed", "unchanged", "declined"],

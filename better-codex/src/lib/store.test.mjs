@@ -126,3 +126,31 @@ test("a streamed patch that never started fails once another item of its turn st
   assert.equal(refuseStreamed(turn, "refused", timing), turn);
   assert.equal(refuseStreamed(next, "reply", timing), next);
 });
+
+test("a turn's keep-awake hold lets go at its end, but not a session-wide one, and is never kept across restarts", async () => {
+  const { forgetCompleted, holdAwakeForTurn, releaseTurnHold, setKeepAwake } = await import("./store.ts");
+  const saved = new Map();
+  globalThis.localStorage = { setItem: (key, value) => saved.set(key, value), getItem: (key) => saved.get(key) ?? null, removeItem: (key) => saved.delete(key) };
+  const kept = () => JSON.parse(saved.get("better-codex:keep-awake"));
+  holdAwakeForTurn("a", "turn-1");
+  assert.ok(getState().keepAwake.has("a"));
+  assert.deepEqual(kept(), [], "a turn's hold is not written down");
+  releaseTurnHold("a", "turn-1");
+  assert.equal(getState().keepAwake.has("a"), false);
+  // The user's switch already on: the turn's end leaves it.
+  setKeepAwake("b", true);
+  holdAwakeForTurn("b", "turn-2");
+  releaseTurnHold("b", "turn-2");
+  assert.ok(getState().keepAwake.has("b"));
+  // A turn's hold then extended to session_idle: kept, and its turn's end leaves it.
+  holdAwakeForTurn("c", "turn-3");
+  setKeepAwake("c", true);
+  assert.deepEqual(kept(), ["b", "c"]);
+  releaseTurnHold("c", "turn-3");
+  assert.ok(getState().keepAwake.has("c"));
+  // A deleted session's 已完成 mark goes with it.
+  setState({ completedAcks: { gone: "error::0", live: "error::1" } });
+  forgetCompleted("gone");
+  assert.deepEqual(getState().completedAcks, { live: "error::1" });
+  delete globalThis.localStorage;
+});

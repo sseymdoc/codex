@@ -77,6 +77,7 @@ import { inScratch } from "../lib/scratch";
 import { heartbeatOn, nextRunOf } from "../lib/rail";
 import { dayTime, navMark, type Mark } from "../lib/scheduled-view";
 import { blockedBoxThreads } from "../lib/wrap-up";
+import { detachLink } from "../lib/linked";
 import { ackStamp, dateBuckets, familyOrder, folderBuckets, outliving, rangeIds, spawnRoot, VIEWS, type SessionSort, type TranscriptView } from "../lib/session";
 import { getState, isShown, isUnread, markCompleted, pluginsOff, readJson, readPref, setSessionView, setState, toast, useStore, writeJson, writePref, type AppState, type ScheduledDialog, type StatusFilter, type ThreadState } from "../lib/store";
 import { useWco } from "./Frame";
@@ -1130,7 +1131,8 @@ function SessionMenu({ row, pinIndex, archived, close, rename }: { row: Row; pin
       : []),
   ];
   // XP5vxiZixk: a nested session leaves its family for the top level.
-  const detach = row.place === "nested" ? act(() => setLocal({ detached: [...local.detached.filter((x) => x !== id), id] })) : undefined;
+  // Like detach_session (DesktopManage.ts): off the link too, so it no longer reports back to its starter.
+  const detach = row.place === "nested" ? act(() => (detachLink(id), sidebarTools.detach(id))) : undefined;
   const groups = [
     opens.length
       ? [

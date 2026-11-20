@@ -100,9 +100,10 @@ function CleanDialog({ usage, onClose, onDone }: { usage: StorageUsage; onClose(
   }, [usage]);
   const candidates = ready ? inactiveWorktrees(usage, Number(days), sidebarTools.pinned()) : [];
   const clean = candidates.filter((tree) => tree.changes === 0);
-  const dirty = candidates.filter((tree) => tree.changes !== 0);
-  const chosen: StoredWorktree[] = dirtyToo ? candidates : clean;
-  const bytes = (trees: StoredWorktree[]) => fileSize(sum(trees.map((tree) => tree.bytes)));
+  // A tree whose status could not be read (changes null) is in neither: the server would skip it.
+  const dirty = candidates.filter((tree) => tree.changes !== null && tree.changes > 0);
+  const chosen: StoredWorktree[] = dirtyToo ? [...clean, ...dirty] : clean;
+  const bytes = (trees: StoredWorktree[]) => sized(trees.some((tree) => tree.bytes === null) ? null : sum(trees.map((tree) => tree.bytes)));
   const remove = async () => {
     setBusy(true);
     try {

@@ -635,8 +635,14 @@ test("management tools are gated like the others, wait for cards where they ask 
   // A receipt with an outcome the tool cannot have is refused.
   const pinning = send(4, "set_pinned", { session_id: "self", pinned: true });
   await new Promise(resolve => setTimeout(resolve, 20));
-  host.respond({ id: events.at(-1).id, result: { threadId: "a", cwd: events.at(-1).cwd, outcome: "archived" } });
-  assert.equal((await pinning).result.isError, true);
+  assert.equal(events.at(-1).name, "set_pinned");
+  assert.equal(host.respond({ id: events.at(-1).id, result: { threadId: "a", cwd: events.at(-1).cwd, outcome: "archived" } }), true);
+  const pinned = (await pinning).result;
+  assert.equal(pinned.isError, true);
+  assert.equal(pinned.content[0].text, "The interface returned an invalid display receipt.");
+  // A read that times out changed nothing; a change that times out may have.
+  assert.equal((await send(8, "list_sessions", {})).result.content[0].text, "The interface did not answer in time; nothing was changed. Try again once.");
+  assert.match((await send(9, "set_pinned", { session_id: "self", pinned: false })).result.content[0].text, /whether anything changed is unknown/);
   // Bad arguments never reach the renderer, and refuse in plain words.
   const before = events.length;
   const bad = (await send(5, "delete_session", { session_ids: [] })).result;

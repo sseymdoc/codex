@@ -35,14 +35,14 @@ const cloudTask = (id, extra = {}) => ({
  * words), and a bridge holding `tasks` (this computer's) and `cloud` (ChatGPT's): `posts` records
  * every write, `consent()` the card t1 shows now.
  */
-function page(t, { opening = "Please watch CI for me.", tasks = [], cloud = [] } = {}) {
+function page(t, { opening = "Please watch CI for me.", tasks = [], cloud = [], runs = [] } = {}) {
   const posts = [];
   t.mock.getter(Rpc.prototype, "connection", () => "page");
   t.mock.method(globalThis, "fetch", async (url, init) => {
     const body = init?.body ? JSON.parse(init.body) : undefined;
     const path = String(url).split("?")[0];
     const answer = (value) => ({ ok: true, json: async () => value });
-    if (path === "/api/automations") return answer({ items: tasks, invalid: [], runs: [], unread: { total: 0, automationIds: [] }, stamp: 1 });
+    if (path === "/api/automations") return answer({ items: tasks, invalid: [], runs, unread: { total: 0, automationIds: [] }, stamp: 1 });
     if (path === "/api/cloud") {
       if (body.method === "GET") return answer({ status: 200, body: body.path === "/automations/schedule_policy" ? { minute_schedule_available: false } : { items: cloud, cursor: null } });
       posts.push({ path: body.path, body: body.body });
@@ -162,4 +162,17 @@ test("a call names the task it is about: the result's, else the one its id has h
   assert.equal(callTaskName("automation_update", { mode: "create", name: "New" }, null), "New");
   assert.equal(callTaskName("cloud_task_update", { mode: "update", id: "gone", title: "Other" }, null), "Other");
   assert.equal(callTaskName("cloud_task_update", { mode: "list" }, { content: [] }), undefined);
+});
+
+test("run on a heartbeat whose session is busy is refused, not reported started; runs come newest first", async (t) => {
+  const run = (threadId, createdAt) => ({ threadId, automationId: "c", status: "ACCEPTED", readAt: null, threadTitle: threadId, sourceCwd: null, inboxTitle: null, inboxSummary: null, archivedUserMessage: null, archivedAssistantMessage: null, archivedReason: null, createdAt, updatedAt: createdAt });
+  // The bridge ranks by status, so the newest can come last.
+  const fake = page(t, { tasks: [local("w"), local("c", { kind: "cron", targetThreadId: undefined, cwds: [] })], runs: [run("old", 1), run("new", 3), run("mid", 2)] });
+  // t1, the heartbeat's session, is running this very turn.
+  const busy = await call(fake, automationRequest, { mode: "run", id: "w" });
+  assert.equal(busy.error?.code, "BLOCKED");
+  assert.match(busy.error.message, /did not start: its session is busy/);
+  assert.equal(fake.posts.length, 0, "nothing was claimed");
+  const listed = await call(fake, automationRequest, { mode: "runs", id: "c" });
+  assert.deepEqual(listed.value.runs.map((r) => r.sessionId), ["new", "mid", "old"]);
 });

@@ -52,7 +52,8 @@ test("only a clean session worktree in a bucket is removed, and its bucket with 
   writeFileSync(path.join(dirty, "new.txt"), "work\n");
   const link = path.join(root, "beef");
   mkdirSync(link);
-  symlinkSync(clean, path.join(link, "project"));
+  // A junction on Windows: a directory symlink there needs Developer Mode or admin rights.
+  symlinkSync(clean, path.join(link, "project"), process.platform === "win32" ? "junction" : "dir");
   const stray = path.join(root, "notabucket", "project");
   mkdirSync(stray, { recursive: true });
   const { removed, skipped } = await storage.removeWorktrees({ root, paths: [main, path.join(link, "project"), stray, unowned, dirty, clean] });

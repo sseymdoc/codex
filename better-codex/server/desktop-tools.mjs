@@ -118,7 +118,7 @@ export function createDesktopTools({ enabled, context, emit, timeoutMs = 5000, c
       const timeout = name === "set_session_title" ? "The rename was not approved in time; the title was left unchanged."
         : name === "enter_plan_mode" ? "Entering plan mode was not approved in time; this chat stays in its current mode."
           : name === "set_setting" ? "The setting change was not approved in time; nothing was changed."
-          : reading && args.mode !== "delete" ? "The interface did not answer in time; nothing was changed. Try again once."
+          : (reading && args.mode !== "delete") || ((MANAGE_TOOL_NAMES.includes(name) || HOST_TOOL_NAMES.includes(name)) && DESKTOP_TOOLS.find(tool => tool.name === name)?.annotations?.readOnlyHint) ? "The interface did not answer in time; nothing was changed. Try again once."
           : AUTOMATION_TOOL_NAMES.includes(name) ? "The interface did not confirm in time; whether the scheduled task was changed is unknown. Check with mode \"list\" before trying again."
           : name === "run_in_terminal" ? "The command was not approved, or its output not read, in time; whether it was typed is unknown. Check with list_terminal_tabs and read_terminal before trying again."
           : offer ? "The user did not answer the card in time; nothing was started. Do the task in this session as usual."

@@ -908,7 +908,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 128,
-            "description": "The task's id from list. Required for view, update, delete and suggested_update."
+            "description": "The task's id from list. Required for view, update, delete, suggested_update, run and runs."
           },
           "kind": {
             "type": "string",
@@ -1177,7 +1177,7 @@
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
-        "idempotentHint": true,
+        "idempotentHint": false,
         "openWorldHint": false
       }
     },

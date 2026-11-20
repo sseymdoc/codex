@@ -40,3 +40,9 @@ test("every tool is listed with a closed schema, and none asks Codex for MCP app
   }
   for (const name of MANAGE_ASKS) assert.ok(MANAGE_TOOL_NAMES.includes(name), name);
 });
+
+test("create_group is not idempotent: each call makes another group", () => {
+  const annotations = (name) => MANAGE_TOOLS.find((tool) => tool.name === name).annotations;
+  assert.equal(annotations("create_group").idempotentHint, false);
+  assert.equal(annotations("rename_group").idempotentHint, true);
+});

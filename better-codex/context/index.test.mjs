@@ -123,6 +123,8 @@ test("a backend that holds more gets the desktop tools, next-step box and other 
   assert.match(full.desktop.toolsText, /you call enter_worktree and end that turn/);
   assert.match(full.desktop.toolsText, /## Settings\nget_settings lists the Better Codex preferences you may change/);
   assert.match(full.desktop.toolsText, /## Split view\nBetter Codex can show two sessions side by side/);
+  assert.match(full.desktop.toolsText, /## Sessions, sidebar and this computer\nlist_sessions, get_session, search_session_transcripts and list_events read the user's other sessions/);
+  assert.match(full.desktop.toolsText, /Prefer archive_session over delete_session\. open_in_editor and reveal_path hand files back to the user/);
   assert.match(full.desktop.toolsText, /## Scheduled tasks\nautomation_update keeps the scheduled tasks Better Codex runs on this computer/);
   assert.match(full.desktop.toolsText, /A turn the user did not start may pause or delete a task; creating or changing one waits on the user's card\./);
   assert.match(full.desktop.toolsText, /cloud_task_update changes ChatGPT's cloud tasks/);

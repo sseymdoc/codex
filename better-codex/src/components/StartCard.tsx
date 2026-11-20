@@ -8,8 +8,7 @@
 
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type MouseEvent, type ReactNode, type Ref } from "react";
 import type { ServerRequest } from "@protocol/ServerRequest";
-import { activeTurn, chooseProject, folderStatus, isArchivedThread, openThread, projectFor, requestSessionId, type FolderStatus } from "../lib/codex";
-import { ackStamp } from "../lib/session";
+import { chooseProject, folderStatus, isArchivedThread, openThread, projectFor, requestSessionId, type FolderStatus } from "../lib/codex";
 import { environmentOf } from "../lib/environments";
 import { homeRelative, localEnvironments, samePath } from "../lib/format";
 import { continues, dismiss, seat, type Dismissals } from "../lib/landing";
@@ -17,6 +16,7 @@ import { requestSummary, waitingPlan, waitingQuestions } from "../lib/questions"
 import { readJson, record, useStore, writePref, type ThreadState } from "../lib/store";
 import { focusComposer } from "./Approvals";
 import { EnvironmentMenu, chooseFolder, environmentIcon, setComposerDraft, useRecentFolders } from "./Composer";
+import { ackable } from "./Sidebar";
 import { Button, Icon, Popover, type IconName } from "./ui";
 
 /** Dismissed next steps (cc43287c9 Wie startCardDismissals). */
@@ -59,11 +59,11 @@ function blockedSessions(ids: Iterable<string>, threads: Record<string, ThreadSt
     const flagged = status.type === "active" && status.activeFlags.length > 0 ? (status.activeFlags.includes("waitingOnApproval") ? "permission" : "question") : null;
     // A proposed plan is Claude's ExitPlanMode request, which j5 counts as a permission.
     const ask = asks.get(id) ?? flagged ?? (waitingQuestions(threads[id], settled).length ? "question" : waitingPlan(threads[id], settled) ? "permission" : null);
-    // 标记为已完成 (Sidebar.tsx ackable) takes a wait with no turn running, or an error, off here too.
-    const marked = (kind: "error" | "blocked") => acks[id] !== undefined && acks[id] === ackStamp(kind, meta.updatedAt, threads[id].turns.at(-1)?.id);
+    // 标记为已完成 takes a wait with no turn running, or an error, off here too: the stamp Sidebar.tsx ackable marks.
+    const marked = acks[id] !== undefined && acks[id] === ackable(threads[id], !!ask);
     if (ask) {
-      if (!(marked("blocked") && !activeTurn(threads[id]))) waiting.push({ kind: "session", id, title, ask, at });
-    } else if (status.type === "systemError" && !marked("error") && samePath(meta.cwd, cwd) && (!failed || at > failed.at)) failed = { kind: "session", id, title, ask: "error", at };
+      if (!marked) waiting.push({ kind: "session", id, title, ask, at });
+    } else if (status.type === "systemError" && !marked && samePath(meta.cwd, cwd) && (!failed || at > failed.at)) failed = { kind: "session", id, title, ask: "error", at };
   }
   waiting.sort((a, b) => b.at - a.at);
   return failed ? [...waiting, failed] : waiting;

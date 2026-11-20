@@ -930,14 +930,45 @@ export function markCompleted(threadId: string, stamp: string): void {
   });
 }
 
-/** 查看选项 → 保持计算机唤醒 · 仅限本次会话 (3.6556 cf74bc599 DA, the session's manualKeepAwake). */
+/** A deleted session takes its mark with it, so it does not use up the 200 kept for live ones. */
+export function forgetCompleted(threadId: string): void {
+  if (!(threadId in state.completedAcks)) return;
+  const { [threadId]: _, ...completedAcks } = state.completedAcks;
+  writeJson(COMPLETED_ACKS, completedAcks);
+  setState({ completedAcks });
+}
+
+/** Sessions held only until their running turn ends (request_keep_awake until "turn_end"): turn id each, never kept across restarts. */
+const turnHolds = new Map<string, string>();
+
+function saveKeepAwake(next: ReadonlySet<string>): void {
+  writePref(KEEP_AWAKE_KEY, JSON.stringify([...next].filter((id) => !turnHolds.has(id))));
+  setState({ keepAwake: next });
+}
+
+/**
+ * 查看选项 → 保持计算机唤醒 · 仅限本次会话 (3.6556 cf74bc599 DA, the session's manualKeepAwake). The
+ * user's switch or a session-wide hold takes over a turn's hold, so that turn's end leaves it on.
+ */
 export function setKeepAwake(threadId: string, on: boolean): void {
-  if (state.keepAwake.has(threadId) === on) return;
+  const turnHeld = turnHolds.delete(threadId);
+  if (state.keepAwake.has(threadId) === on && !turnHeld) return;
   const next = new Set(state.keepAwake);
   if (on) next.add(threadId);
   else next.delete(threadId);
-  writePref(KEEP_AWAKE_KEY, JSON.stringify([...next]));
-  setState({ keepAwake: next });
+  saveKeepAwake(next);
+}
+
+/** Holds the session awake for turn `turnId` alone; one already held stays as it is. */
+export function holdAwakeForTurn(threadId: string, turnId: string): void {
+  if (state.keepAwake.has(threadId)) return;
+  turnHolds.set(threadId, turnId);
+  saveKeepAwake(new Set(state.keepAwake).add(threadId));
+}
+
+/** Turn `turnId` ended: its own hold, if nothing took it over, lets go. */
+export function releaseTurnHold(threadId: string, turnId: string): void {
+  if (turnHolds.get(threadId) === turnId) setKeepAwake(threadId, false);
 }
 
 const initialState: AppState = {

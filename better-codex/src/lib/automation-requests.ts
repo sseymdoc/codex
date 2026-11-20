@@ -4,7 +4,7 @@
 import { desktopError, type DesktopRequest, type DesktopResult } from "../../context/desktop-tools.mjs";
 import { LIST_MAX, automationAsks, kindFields, resultTask, type AutomationArgs, type AutomationTask, type CloudTask, type CloudTaskArgs, type LocalTask } from "../../context/automation-tools.mjs";
 import { describeRrule, jitterSpan, nextRun, parseRrule } from "../../context/rrule.mjs";
-import { automationsState, createAutomation, deleteAutomation, refreshAutomations, runNow, updateAutomation, type Automation, type AutomationInput } from "./automations";
+import { automationsState, createAutomation, deleteAutomation, heartbeatBlocker, refreshAutomations, runNow, updateAutomation, type Automation, type AutomationInput } from "./automations";
 import { cloudAutomationsState, cloudDraftOf, cloudProblem, cloudSchedule, refreshCloud, removeCloudAutomation, saveCloudAutomation, scheduleParts, schedulePolicy, setCloudRule, setCloudStatus, wallTime, zonedTime, type CloudAccess, type CloudAutomation } from "./cloud-automations";
 import { ensureThreads, errorMessage, modelLabel } from "./codex";
 import { EFFORT_LABELS, homeRelative, threadTitle } from "./format";
@@ -121,7 +121,7 @@ export async function automationRequest(request: DesktopRequest, args: Automatio
   if (args.mode === "view") return { threadId, cwd, outcome: "viewed", task: localTask(old!, true) };
   // runs: ChatGPT automation_runs of a cron task, newest first (heartbeats keep none).
   if (args.mode === "runs") {
-    const runs = automationsState().runs.filter((run) => run.automationId === old!.id).slice(0, 50).map((run) => ({
+    const runs = automationsState().runs.filter((run) => run.automationId === old!.id).sort((a, b) => b.createdAt - a.createdAt).slice(0, 50).map((run) => ({
       sessionId: run.threadId, status: run.status, title: run.threadTitle ?? run.inboxTitle, startedAt: new Date(run.createdAt).toISOString(), updatedAt: new Date(run.updatedAt).toISOString(), read: run.readAt !== null, summary: run.inboxSummary,
     }));
     return { threadId, cwd, outcome: "runs", task: localTask(old!, false), runs };
@@ -142,7 +142,15 @@ export async function automationRequest(request: DesktopRequest, args: Automatio
         check();
         if (!allowed) return { threadId, cwd, outcome: "declined", task };
       }
-      await runNow(old!.id);
+      // The refusal is told before runNow, in the model's words; runNow's own answer covers the rest (held by another window).
+      if (old!.kind === "heartbeat") {
+        const target = old!.targetThreadId ?? "";
+        await ensureThreads([target]);
+        const blocker = heartbeatBlocker(getState(), target);
+        if (blocker) throw desktopError("BLOCKED", `The scheduled task “${name}” did not start: its session ${blocker === "missing" ? "is gone" : blocker === "archived" ? "is archived" : "is busy (a turn running or waiting on the user)"}.`);
+      }
+      const refused = await runNow(old!.id);
+      if (refused) throw desktopError("BLOCKED", `The scheduled task “${name}” did not start: ${refused}.`);
       return { threadId, cwd, outcome: "started", task: { id: old!.id, name: old!.name } };
     }
     const kind = old?.kind ?? args.kind!;

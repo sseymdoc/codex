@@ -378,6 +378,8 @@ function attach(shell: Shell, container: HTMLElement, cwd: string, reduce: boole
   container.replaceChildren(host);
   term.open(host); // a no-op once opened
   term.options.theme = themeFor(container);
+  // A background tab missed 代码字号 changes (the observer below follows the shown tab only).
+  if (term.options.fontSize !== fontSize()) term.options.fontSize = fontSize();
   fit.fit();
   term.refresh(0, term.rows - 1);
 }

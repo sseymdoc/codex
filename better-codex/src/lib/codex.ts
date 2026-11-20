@@ -158,6 +158,9 @@ import {
   setTitleSource,
   forgetAsked,
   forgetTodos,
+  forgetCompleted,
+  holdAwakeForTurn,
+  releaseTurnHold,
   recordTodo,
   toast,
   updateItem,
@@ -2213,14 +2216,11 @@ export function onReceipt(requestId: string, then: () => void): void {
 }
 
 /** request_keep_awake until "turn_end" (Claude 4.4212 ccd_host): the hold this session's running turn lets go of. */
-const turnKeepAwake = new Map<string, string>();
 export function keepAwakeForTurn(threadId: string): boolean {
   const turn = activeTurn(getState().threads[threadId]);
   if (!turn) return false;
-  // Already held (the session menu's 保持计算机唤醒, or session_idle): the turn's end must not let it go.
-  if (getState().keepAwake.has(threadId)) return true;
-  turnKeepAwake.set(threadId, turn.id);
-  setKeepAwake(threadId, true);
+  // Already held (the session menu's 保持计算机唤醒, or session_idle), or taken over later: the turn's end leaves it.
+  holdAwakeForTurn(threadId, turn.id);
   return true;
 }
 
@@ -3021,8 +3021,11 @@ export async function exportThread(id: string): Promise<void> {
   const link = document.createElement("a");
   link.href = url;
   link.download = `${title.replace(/[\\/:*?"<>|\s]+/g, " ").trim().slice(0, 80) || "codex"}.md`;
+  document.body.append(link);
   link.click();
-  URL.revokeObjectURL(url);
+  link.remove();
+  // As FileMenu's saveImage and downloadFlashcardsCsv: revoked at once, the download may not have read it yet.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /** Forks `id` (through `lastTurnId`), opens the fork and returns its id. */
@@ -4486,6 +4489,7 @@ function onNotification(notification: ServerNotification): void {
       setTitleSource(notification.params.threadId, undefined);
       forgetAsked(notification.params.threadId);
       forgetTodos(notification.params.threadId);
+      forgetCompleted(notification.params.threadId);
       forgetSession(notification.params.threadId);
       forgetLazyWorktree(notification.params.threadId);
       forgetFromList(notification.params.threadId);
@@ -4647,10 +4651,7 @@ function onNotification(notification: ServerNotification): void {
         if (turn.status === "completed" && (resume.text !== PLAN_RESUME || thread?.planMode) && !thread?.queue.length && !s.pendingMessages[threadId] && !s.requests.some((request) => requestSessionId(request, s.threads) === threadId))
           void sendMessage(threadId, [{ type: "text", text: resume.text, text_elements: [] }]).catch((error) => toast("warning", "发送失败", errorMessage(error)));
       }
-      if (turnKeepAwake.get(threadId) === turn.id) {
-        turnKeepAwake.delete(threadId);
-        setKeepAwake(threadId, false);
-      }
+      releaseTurnHold(threadId, turn.id);
       turnEnded(threadId);
       return;
     }

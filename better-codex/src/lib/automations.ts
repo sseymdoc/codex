@@ -271,12 +271,17 @@ async function configRead(): Promise<boolean> {
 }
 const NO_CONFIG = "读取配置失败，请稍后再试。";
 
-/** 立即运行 (once the first reads are in, as a tick). A cron task's schedule moves on; a heartbeat's once it started. */
-export async function runNow(id: string): Promise<void> {
+/** 立即运行 (once the first reads are in, as a tick). A cron task's schedule moves on; a heartbeat's once it started.
+ *  Resolves to why a heartbeat could not start (as its toast says it), null once it did. */
+export async function runNow(id: string): Promise<string | null> {
   await whenReadsSettled();
   if (!(await configRead())) throw new Error(NO_CONFIG);
   const { claim } = await api<{ claim: Claim }>("run-now", { id });
-  await (claim.automation.kind === "cron" ? runCron(claim, Date.now()) : runHeartbeat(claim, Date.now()));
+  if (claim.automation.kind === "cron") {
+    await runCron(claim, Date.now());
+    return null;
+  }
+  return runHeartbeat(claim, Date.now());
 }
 
 const report = (token: string, outcome: "started" | "retry" | "failed" | "paused", extra: Record<string, unknown> = {}) =>
@@ -493,7 +498,7 @@ async function heldTargets(): Promise<string[]> {
   return loaded.filter((id) => targets.has(id));
 }
 
-async function runHeartbeat(claim: Claim, now: number): Promise<void> {
+async function runHeartbeat(claim: Claim, now: number): Promise<string | null> {
   const { automation: a, token, trigger } = claim;
   const target = a.targetThreadId ?? "";
   // This run gives it back when it is done.
@@ -517,7 +522,7 @@ async function runHeartbeat(claim: Claim, now: number): Promise<void> {
       heldSince.delete(`${a.id}@${claim.nominalAt}`);
       await report(token, "started");
       if (trigger === "run_now") started(startText(a.name, trigger, null), target);
-      return;
+      return null;
     }
   } catch (error) {
     // A turn that started meanwhile is busy; resuming an archived session says so. Another app-server
@@ -529,7 +534,7 @@ async function runHeartbeat(claim: Claim, now: number): Promise<void> {
       giveBack(target);
       await report(token, "failed");
       if (trigger === "run_now") failedToStart(a, trigger, error);
-      return;
+      return message;
     }
   }
   giveBack(target);
@@ -546,6 +551,7 @@ async function runHeartbeat(claim: Claim, now: number): Promise<void> {
   }
   await report(token, (blocker === "busy" || blocker === "elsewhere") && !gaveUp ? "retry" : blocker === "archived" ? "paused" : "failed");
   if (trigger === "run_now") toast("warning", `无法启动“${a.name}”。${BLOCKED[blocker]}。`);
+  return BLOCKED[blocker];
 }
 
 // ---------------------------------------------------------------------------

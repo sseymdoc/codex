@@ -2,8 +2,13 @@ export declare const MANAGE_TOOL_NAMES: readonly ["close_pane", "set_transcript_
 export type ManageToolName = typeof MANAGE_TOOL_NAMES[number];
 export declare const MANAGE_ASKS: readonly ManageToolName[];
 export declare const MANAGE_TOOLS: { name: ManageToolName; description: string; inputSchema: object; annotations: object }[];
+/** Every outcome a receipt of a toolTable may carry: manage-tools, host-tools and visualize-tools (each tool's own list is in its SPEC). */
+export type ManageOutcome =
+  | "closed" | "not_open" | "not_shown" | "switched" | "unchanged" | "listed" | "created" | "renamed" | "declined" | "deleted" | "moved" | "changed" | "marked" | "nothing" | "found" | "read" | "archived" | "restored" | "already" | "stopped" | "idle" | "detached" | "exported" | "reconnecting"
+  | "opened" | "revealed" | "held" | "covered" | "no_turn" | "removed" | "granted" | "read_only" | "full_access" | "cancelled" | "moving"
+  | "shown" | "ready";
 /** A management call's receipt: one of the tool's outcomes and what its text needs. */
-export interface ManageReceipt { threadId: string; cwd: string; outcome: string; data?: unknown }
+export interface ManageReceipt { threadId: string; cwd: string; outcome: ManageOutcome; data?: unknown }
 
 export interface ToolSpec { name: string; description: string; properties: Record<string, object>; required: string[]; annotations: object; outcomes: string[]; text(args: Record<string, unknown>, receipt: ManageReceipt): string }
 export declare const ID: object;

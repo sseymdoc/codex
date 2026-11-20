@@ -6,7 +6,9 @@
 // permission mode always ask.
 
 import type { Thread } from "@protocol/v2/Thread";
+import type { ThreadListResponse } from "@protocol/v2/ThreadListResponse";
 import { desktopError, type DesktopRequest, type DesktopResult } from "../../context/desktop-tools.mjs";
+import type { ManageReceipt } from "../../context/manage-tools.mjs";
 import {
   activeTurn,
   archiveThread,
@@ -21,6 +23,7 @@ import {
   interrupt,
   isArchivedThread,
   listConnectors,
+  loadTurns,
   markRead,
   markUnread,
   moveToSection,
@@ -63,6 +66,24 @@ async function sessionOf(threadId: string, id: string, self = true): Promise<Thr
 
 const startedBy = (threadId: string, id: string) => getState().links[id]?.parentId === threadId;
 
+/** setOverride, as an error when the server refused the pick (it was taken back). */
+async function apply(id: string, patch: Parameters<typeof setOverride>[1]): Promise<void> {
+  if (!(await setOverride(id, patch))) throw desktopError("SETTINGS_FAILED", "The app server refused that change; the session keeps its previous setting.");
+}
+
+/** This session's linked family: its furthest parent and every session under it, at any depth. */
+function familyOf(threadId: string): Set<string> {
+  const links = getState().links;
+  let root = threadId;
+  for (const seen = new Set<string>(); links[root] && !seen.has(root); root = links[root].parentId) seen.add(root);
+  const family = new Set([root]);
+  for (let size = 0; size !== family.size; ) {
+    size = family.size;
+    for (const [id, link] of Object.entries(links)) if (family.has(link.parentId)) family.add(id);
+  }
+  return family;
+}
+
 /** A card the user allows or declines; full access skips it unless `always`. */
 async function ask(request: DesktopRequest, check: Check, signal: AbortSignal, title: string, rows: [string, string][], always = false): Promise<boolean> {
   if (!always && effectiveSettings(check()).permission === "full-access") return true;
@@ -101,7 +122,7 @@ function contextOf(thread: ThreadState) {
 /** One management tool's call, as a receipt for manageReceipt. */
 export async function manageRequest(request: DesktopRequest, args: Args, check: Check, signal: AbortSignal): Promise<DesktopResult> {
   const { threadId, cwd } = request;
-  const done = (outcome: string, data?: unknown) => ({ threadId, cwd, outcome, ...(data !== undefined && { data }) }) as DesktopResult;
+  const done = (outcome: ManageReceipt["outcome"], data?: unknown): ManageReceipt => ({ threadId, cwd, outcome, ...(data !== undefined && { data }) });
   const s = getState();
   const str = (key: string) => args[key] as string;
   switch (request.name) {
@@ -124,9 +145,19 @@ export async function manageRequest(request: DesktopRequest, args: Args, check: 
     }
     // --- ccd_sidebar
     case "list_groups": {
-      const counts = new Map<string, number>();
-      for (const thread of Object.values(s.threads)) if (thread.meta.section && !thread.meta.parentThreadId) counts.set(thread.meta.section.id, (counts.get(thread.meta.section.id) ?? 0) + 1);
-      return done("listed", s.sections.map((section, order) => ({ id: section.id, name: taskText(section.name), session_count: counts.get(section.id) ?? 0, order })));
+      // Counted on the server: the sidebar has paged in only the recent sessions.
+      const count = async (sectionId: string) => {
+        let n = 0;
+        let cursor: string | null = null;
+        do {
+          const page: ThreadListResponse = await call("thread/list", { sectionId, cursor, limit: 200, sourceKinds: ["cli", "vscode"] });
+          n += page.data.filter((meta) => !meta.parentThreadId).length;
+          cursor = page.nextCursor;
+        } while (cursor);
+        return n;
+      };
+      const counts = await Promise.all(s.sections.map((section) => count(section.id)));
+      return done("listed", s.sections.map((section, order) => ({ id: section.id, name: taskText(section.name), session_count: counts[order], order })));
     }
     case "create_group": {
       const section = await createSection(str("name"), null);
@@ -191,10 +222,19 @@ export async function manageRequest(request: DesktopRequest, args: Args, check: 
     // --- ccd_session_mgmt
     case "list_sessions": {
       const limit = (args.limit as number | undefined) ?? 50;
-      const found = await searchThreads(str("query") ?? "", args.archived === true, Math.min(200, limit + 1));
+      const archived = args.archived === true;
+      let found: Thread[];
+      if (args.family_only === true) {
+        // The family by id, not out of a limited search that recent unrelated sessions can fill.
+        const family = [...familyOf(threadId)];
+        await ensureThreads(family);
+        const query = (str("query") ?? "").toLowerCase();
+        const at = (meta: Thread) => meta.recencyAt ?? meta.updatedAt;
+        // ponytail: archived is known only for sessions this renderer saw in an archive list; a thread/list id filter would make it exact.
+        found = family.flatMap((id) => getState().threads[id]?.meta ?? []).filter((meta) => isArchivedThread(meta.id) === archived && threadTitle(meta).toLowerCase().includes(query)).sort((a, b) => at(b) - at(a));
+      } else found = await searchThreads(str("query") ?? "", archived, Math.min(200, limit + 1));
       const threads = getState().threads;
-      const family = args.family_only === true ? new Set([...Object.entries(getState().links).filter(([, link]) => link.parentId === threadId).map(([id]) => id), getState().links[threadId]?.parentId]) : null;
-      const rows = found.filter((meta) => meta.id !== threadId && !meta.parentThreadId && threads[meta.id] && (!family || family.has(meta.id))).slice(0, limit).map((meta) => row(threadId, threads[meta.id]));
+      const rows = found.filter((meta) => meta.id !== threadId && !meta.parentThreadId && threads[meta.id]).slice(0, limit).map((meta) => row(threadId, threads[meta.id]));
       return done("listed", rows);
     }
     case "get_session": {
@@ -237,7 +277,9 @@ export async function manageRequest(request: DesktopRequest, args: Args, check: 
         await unarchiveThread(id);
         return done("restored");
       }
-      if (!activeTurn(target)) return done("idle");
+      // Found by a list, a running session has its status but not its turns: read them to stop the turn.
+      if (!activeTurn(target) && target.meta.status.type === "active") await loadTurns(id, false);
+      if (!activeTurn(getState().threads[id])) return done("idle");
       if (!mine && !(await ask(request, check, signal, "允许 Codex 停止另一个会话的当前回合吗？", [["会话", titleOf(target.meta)]]))) return done("declined");
       await interrupt(id);
       return done("stopped");
@@ -278,7 +320,7 @@ export async function manageRequest(request: DesktopRequest, args: Args, check: 
         if (!model) throw desktopError("UNKNOWN_MODEL", `No model ${wanted}. The app offers: ${s.models.map((m) => m.id).join(", ")}.`);
         if (settings.model === model.id) return done("unchanged");
         if (!(startedBy(threadId, id) && model.id === mine.model) && !(await ask(request, check, signal, "允许 Codex 更改另一个会话的模型吗？", [["会话", titleOf(target.meta)], ["模型", `${settings.model ?? "默认"} → ${model.displayName}`]]))) return done("declined");
-        await setOverride(id, { model: model.id });
+        await apply(id, { model: model.id });
         return done("changed", { model: model.id });
       }
       const effort = str("effort").toLowerCase();
@@ -286,8 +328,9 @@ export async function manageRequest(request: DesktopRequest, args: Args, check: 
       if (levels.length && !levels.includes(effort as never)) throw desktopError("UNKNOWN_EFFORT", `That session's model takes: ${levels.join(", ")}.`);
       if (settings.effort === effort) return done("unchanged");
       const rank = (level: string | null) => (level ? levels.indexOf(level as never) : -1);
-      if (!(startedBy(threadId, id) && rank(effort) <= rank(mine.effort)) && !(await ask(request, check, signal, "允许 Codex 更改另一个会话的推理强度吗？", [["会话", titleOf(target.meta)], ["推理强度", `${settings.effort ?? "默认"} → ${effort}`]]))) return done("declined");
-      await setOverride(id, { effort });
+      // An unknown level list ranks nothing, so it is a raise that asks.
+      if (!(startedBy(threadId, id) && levels.length > 0 && rank(effort) <= rank(mine.effort)) && !(await ask(request, check, signal, "允许 Codex 更改另一个会话的推理强度吗？", [["会话", titleOf(target.meta)], ["推理强度", `${settings.effort ?? "默认"} → ${effort}`]]))) return done("declined");
+      await apply(id, { effort });
       return done("changed");
     }
     case "set_session_permission_mode": {
@@ -300,7 +343,7 @@ export async function manageRequest(request: DesktopRequest, args: Args, check: 
       const raise = now === null || PERMISSIONS.indexOf(mode) > PERMISSIONS.indexOf(now);
       const own = id === threadId || startedBy(threadId, id);
       if ((raise || !own) && !(await ask(request, check, signal, "允许 Codex 更改会话的权限模式吗？", [["会话", titleOf(target.meta)], ["权限模式", `${now ?? "自定义"} → ${mode}`]], raise))) return done("declined");
-      await setOverride(id, { permission: mode });
+      await apply(id, { permission: mode });
       return done("changed");
     }
     case "set_session_fast_mode": {
@@ -310,7 +353,7 @@ export async function manageRequest(request: DesktopRequest, args: Args, check: 
       if (on && !fastAvailable(settings.model)) throw desktopError("UNAVAILABLE", "That session's model does not offer fast mode.");
       if ((settings.serviceTier === "priority") === on) return done("unchanged");
       if (on && !(await ask(request, check, signal, "允许 Codex 开启快速模式吗？", [["会话", titleOf(target.meta)], ["说明", "快速模式按更高费率计费，并写入 config.toml"]]))) return done("declined");
-      await setOverride(target.meta.id, { serviceTier: on ? "priority" : "default" });
+      await apply(target.meta.id, { serviceTier: on ? "priority" : "default" });
       return done("changed");
     }
     case "detach_session": {

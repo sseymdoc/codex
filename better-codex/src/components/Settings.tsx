@@ -49,6 +49,7 @@ import {
   startWindowsSandboxSetup,
   syncHostContexts,
   windowsSandboxReadiness,
+  worktreeRoot,
   writeConfig,
   type RemoteClient,
   type RemotePairing,
@@ -1032,7 +1033,7 @@ function WorktreeLocationRow() {
   const configured = useStore((s) => (s.config?.desktop as Record<string, unknown> | undefined)?.["git-worktree-root"]);
   const home = useStore((s) => s.server.info?.codexHome);
   const custom = typeof configured === "string" && configured.trim() ? configured.trim() : null;
-  const shown = custom ?? (home ? `${home}${home.includes("\\") ? "\\" : "/"}worktrees` : "默认");
+  const shown = custom || home ? worktreeRoot() : "默认";
   const save = (value: string | null) =>
     void writeConfig([{ keyPath: "desktop.git-worktree-root", value, mergeStrategy: value === null ? "replace" : "upsert" }]).catch((error) => toast("warning", "无法更改工作树位置。", errorMessage(error)));
   return (
@@ -2108,7 +2109,12 @@ function searchSections(): SearchSection[] {
 
 /** The setting rows the command palette offers once something is typed (c2771e1f6 gs): each opens its page at the row. */
 export function settingRows(): { page: SettingsTab; anchor: string; label: string; phrases: string[] }[] {
-  return INDEX.filter((entry) => entry.when?.() ?? true).map((entry) => ({ page: entry.page, anchor: entry.anchor, label: entry.label, phrases: [pageInfo(entry.page).label, ...(entry.phrases ?? [])] }));
+  // The pages the search lists (no 此电脑 in the browser, no 插件 while plugins are off).
+  const pages = new Set(searchSections().map((section) => section.id));
+  const rows = INDEX.filter((entry) => pages.has(entry.page) && (entry.when?.() ?? true));
+  // A label two pages share (外观) reads「页 → 行」so the rows tell apart.
+  const shared = (label: string) => rows.filter((entry) => entry.label === label).length > 1;
+  return rows.map((entry) => ({ page: entry.page, anchor: entry.anchor, label: shared(entry.label) ? `${pageInfo(entry.page).label} → ${entry.label}` : entry.label, phrases: [pageInfo(entry.page).label, ...(entry.phrases ?? [])] }));
 }
 
 function Highlight({ text, query }: { text: string; query: string }) {
